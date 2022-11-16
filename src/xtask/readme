@@ -1,0 +1,6 @@
+xtask:
+
+    run w/ debug                                            --> RUST_LOG=info cargo xtask run 
+    build eBPF binaries                                     --> cargo xtask build-ebpf
+    get Rust bindings for structs declared in codegen       --> cargo xtask codegen
+        (from /sys/kernel/btf/vmlinux)

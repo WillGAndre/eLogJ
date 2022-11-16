@@ -1,0 +1,2 @@
+[workspace]
+members = ["trf", "trf-common", "xtask", "http-parser"]
