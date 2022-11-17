@@ -8,7 +8,7 @@ use clap::Parser;
 use log::{info, warn};
 use tokio::{signal, task};
 use trf_common::EventLog;
-// use http_parser::{parse_header};
+use http_parser::{get_default_header_offset};
 use std::net::Ipv4Addr;
 use bytes::BytesMut;
 
@@ -17,7 +17,7 @@ struct Opt {
     #[clap(short, long, default_value = "docker0")] // wlp2s0
     iface: String,
     #[clap(short, long, default_value = "1")]
-    mode: u8,
+    mode: u8
 }
 
 #[tokio::main]
@@ -26,12 +26,17 @@ async fn main() -> Result<(), anyhow::Error> {
     
     env_logger::init();
 
-    // test
-    // parse_header("http://127.0.0.1".to_string(), "x-api-version".to_string()).await;
-    // ----
+    let header_seq: [u8; 13] = [88,45,65,112,195,45,86,101,114,115,105,111,110];
+    let (nameoff, payloadoff) = get_default_header_offset();
 
     let mode = opt.mode as u8;
-    let mut bpf = BpfLoader::new().set_global("MODE", &mode).load(
+    let mut bpf = BpfLoader::new()
+        .set_global("MODE", &mode)
+        .set_global("LOGGER_N_SIZE", &13)
+        .set_global("LOGGER_N_SEQ", &header_seq)
+        .set_global("LOGGER_N_OFFSET", &nameoff)
+        .set_global("LOGGER_OFFSET", &payloadoff)
+        .load(
         include_bytes_aligned!(
             "../../target/bpfel-unknown-none/debug/trf"
         ),

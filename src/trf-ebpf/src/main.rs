@@ -30,7 +30,13 @@ use bindings::{ethhdr, iphdr, tcphdr};
  * Although obsfucated payloads is still an issue.
 **/
 #[no_mangle]
-static LOGGER_OFFSET: usize = 91;
+static LOGGER_N_SIZE: usize;
+#[no_mangle]
+static LOGGER_N_SEQ: [u8; usize];
+#[no_mangle]
+static LOGGER_N_OFFSET: usize;
+#[no_mangle]
+static LOGGER_OFFSET: usize;
 
 // JNDI binding
 const JNDI: [u8; 6] = [36, 123, 106, 110, 100, 105];
@@ -121,8 +127,6 @@ unsafe fn update_RTX(key: u32) -> Option<u32> {
     }
     Some(1)
 }
-
-
 
 // INGRESS
 
@@ -282,6 +286,11 @@ fn lookup_hdr(ctx: &TcContext, mut byte: u8, nxbyteidx: usize) -> Option<usize> 
     return None
 }
 
+
+/** Left hand side offet: 
+  * Incremented for each byte not considered, since our logger offset will be
+  * relative to the beginning of the header name field.
+ **/
 #[inline(always)]
 #[unroll_for_loops]
 unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
@@ -300,10 +309,6 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
                 } // found GET request
             }
 
-            /** Left hand side offet: 
-             * Incremented for each byte not considered, since our logger offset will be
-             * relative to the beginning of the header name field.
-            **/
             let mut lhsoffset = 0;
             i = 76;
             for j in 0..7 { // 13 - 'X-Api-Version' Length
