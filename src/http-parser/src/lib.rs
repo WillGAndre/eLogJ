@@ -1,3 +1,6 @@
+use std::io::Write;
+use ascii_converter::string_to_decimals;
+
 trait DefHdrs {
     fn set_default_headers(self) -> Self;
     fn set_template_headers(self, payloadkey: &str) -> Self;
@@ -30,10 +33,15 @@ pub fn get_template_header_offset(payloadkey: &str) -> (usize, usize) {
     }
     hdrlen += 2;
     println!("{:#?} len: {}", (nameoff, valueoff), hdrlen);
+
+    // let header_dec: Vec<u8> = string_to_decimals(payloadkey).unwrap();
+    // let mut f = std::fs::File::create("header-seq.dat").unwrap();
+    // f.write_all(&header_dec[..]).expect("write header to file");
+
     (nameoff, valueoff)
 }
 
-pub fn get_default_header_offset() -> (usize, usize) {
+pub fn get_default_header_offset() -> (u8, u8) {
     let (mut nameoff, mut valueoff): (usize, usize) = (0,0);
     let req = http::Request::builder().set_default_headers();
     let mut hdrlen: usize = "GET / HTTP1./1".len() + 2;
@@ -45,7 +53,7 @@ pub fn get_default_header_offset() -> (usize, usize) {
     }
     hdrlen += 2;
     println!("{:#?} len: {}", (nameoff, valueoff), hdrlen);
-    (nameoff, valueoff)
+    (nameoff.try_into().unwrap(), valueoff.try_into().unwrap())
 }
 
 #[cfg(test)]

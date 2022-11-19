@@ -30,13 +30,11 @@ use bindings::{ethhdr, iphdr, tcphdr};
  * Although obsfucated payloads is still an issue.
 **/
 #[no_mangle]
-static LOGGER_N_SIZE: usize;
+static LOGGER_N_SIZE: u32 = 13;
 #[no_mangle]
-static LOGGER_N_SEQ: [u8; usize];
+static LOGGER_N_OFFSET: u8 = 76;
 #[no_mangle]
-static LOGGER_N_OFFSET: usize;
-#[no_mangle]
-static LOGGER_OFFSET: usize;
+static LOGGER_P_OFFSET: u8 = 91; // 76 + LOGGER_N_SIZE + 2 (': ')
 
 // JNDI binding
 const JNDI: [u8; 6] = [36, 123, 106, 110, 100, 105];
@@ -59,6 +57,7 @@ const ETH_P_IP: u16 = 0x0800;
 const ETH_HDR_LEN: usize = mem::size_of::<ethhdr>();
 const IP_HDR_LEN: usize = mem::size_of::<iphdr>();
 const TCP_HDR_LEN: usize = mem::size_of::<tcphdr>();
+const TCP_DATA: usize = ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12; // +12 (TCP header opts)
 
 #[no_mangle]
 static MODE: u8 = 1;    
@@ -175,42 +174,45 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
     let dcount = unsafe { update_RTX(daddr).expect("Error updating RTX") };
 
     if dcount < scount && ip_proto == IPPROTO_TCP {
-        if MODE == 2 {  // Block TCP
+        if MODE == 2 {  // Block unexpected outbound TCP
             ctxdrop = 1;
             unsafe { block_addr(daddr) };
         } else if MODE == 1 {   // Filter HTTP: Specific to the JNDI Exploit (which leverages JNDI lookups using HTTP)
-            let payload_size = ((ctx.data_end() - ctx.data()) - (ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12)) as usize;
+            let payload_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
             if payload_size >= 100 {
-                let payload_offset = ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12;
-                let byte: u8 = unsafe {
-                    *ptr_at(&ctx, payload_offset)?
-                };
+                let mut byte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
 
-                // TODO: Check viablility of assert_eq (on failure, they will panic)
-                // todo: get dport, if LDAP block
+                // TODO: get dport (block LDAP ports --> confidence levels)
                 if byte == HTTP_GET[0] {
-                    assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 1)? }, HTTP_GET[1]);
-                    assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 2)? }, HTTP_GET[2]);
-                    info!(&ctx, "\tHTTP GET: payload_size: {}", payload_size);
-                    
-                    match unsafe { LOOKUPS.get(&saddr) } {
-                        None => {
-                            // block all unexpected GET requests
-                        },
-                        Some(_) => { // Triggered jndi lookup
-                            // Drop packet + block addr
-                            ctxdrop = 1;
-                            unsafe { 
-                                block_addr(daddr);
-                                LOOKUPS.insert(&saddr, &0, 0).expect("ended lookup");
-                            };
-                        },
-                    };
+                    for i in 1..HTTP_GET.len() {
+                        byte = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
+                        if byte != HTTP_GET[i] {
+                            // todo: err handling
+                        }
+
+                        info!(&ctx, "\tHTTP GET: payload_size: {}", payload_size);
+                        match unsafe { LOOKUPS.get(&saddr) } {
+                            None => {
+                                // block all unexpected GET requests
+                            },
+                            Some(_) => { // Triggered jndi lookup
+                                // Drop packet + block addr
+                                ctxdrop = 1;
+                                unsafe { 
+                                    block_addr(daddr);
+                                    LOOKUPS.insert(&saddr, &0, 0).expect("ended lookup");
+                                };
+                            },
+                        };
+                    }
                 } else if byte == HTTP_RES[0] {
-                    assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 1)? }, HTTP_RES[1]);
-                    assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 2)? }, HTTP_RES[2]);
-                    assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 3)? }, HTTP_RES[3]);
-                    info!(&ctx, "\tHTTP RESP: payload_size: {}", payload_size);
+                    for i in 1..HTTP_RES.len() {
+                        byte = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
+                        if byte != HTTP_RES[i] {
+                            // todo: err handling
+                        }
+                        info!(&ctx, "\tHTTP RESP: payload_size: {}", payload_size);
+                    }
                 }
             }
         }
@@ -266,18 +268,20 @@ pub fn egtrf(ctx: TcContext) -> i32 {
 #[inline(always)]
 #[unroll_for_loops]
 fn lookup_hdr(ctx: &TcContext, mut byte: u8, nxbyteidx: usize) -> Option<usize> { // TODO: Pass nxbyte instead of nxbyteindex
-    let header_seq: [u8; 13] = [88,45,65,112,195,45,86,101,114,115,105,111,110];
+    // [88,45,65,112,105,45,86,101,114,115,105,111,110];
+    let header_seq = core::include!("../../http-parser/src/header-dec-seq"); // len < LOGGER_N_SIZE
+    let sz: usize = LOGGER_N_SIZE as usize;
 
-    for i in 0..13 {
+    for i in 0..sz {
         if byte == header_seq[i] {
-            if i == 12 {
+            if i == sz - 1 {
                 return Some(3)
             } else {
                 let j = i + 1;
-                if j < 13 {
-                    byte = ctx.load::<u8>(ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12 + 76 + nxbyteidx).expect("valid header byte");
+                if j < sz {
+                    byte = ctx.load::<u8>(TCP_DATA + (LOGGER_N_OFFSET as usize) + nxbyteidx).expect("valid header byte");
                     if byte == header_seq[j] {
-                        return Some((i + (13 - j) + 3) as usize) // +2 --> ': ' ; +1 --> payload offset
+                        return Some((i + (sz - j) + 3) as usize) // +2 --> ': ' ; +1 --> payload offset
                     }
                 }
             }
@@ -296,13 +300,13 @@ fn lookup_hdr(ctx: &TcContext, mut byte: u8, nxbyteidx: usize) -> Option<usize> 
 unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
     let mut lookup = 0;
 
-    match ctx.load::<u8>(ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12) {
+    match ctx.load::<u8>(TCP_DATA) {
         Err(_) => {},
         Ok(mut byte) => {
             let mut i: usize = 0;
             if byte == HTTP_GET[i] {
                 for i in 1..HTTP_GET.len() {
-                    byte = ctx.load::<u8>(ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12 + i).expect("valid GET byte");
+                    byte = ctx.load::<u8>(TCP_DATA + i).expect("valid GET byte");
                     if byte != HTTP_GET[i] {
                         return lookup;
                     }
@@ -310,19 +314,19 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
             }
 
             let mut lhsoffset = 0;
-            i = 76;
-            for j in 0..7 { // 13 - 'X-Api-Version' Length
-                byte = ctx.load::<u8>(ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12 + i + j).expect("valid header byte");
+            i = LOGGER_N_OFFSET as usize;
+            for j in 0..(LOGGER_N_SIZE as usize + 2 - 1) / 2 { // 13 - 'X-Api-Version' Length ; https://stackoverflow.com/a/72442854
+                byte = ctx.load::<u8>(TCP_DATA + i + j).expect("valid header byte");
                 
                 match lookup_hdr(ctx, byte, j+1) {
                     None => lhsoffset += 1,
                     Some(mut logger_off) => {
                         logger_off += lhsoffset;
-                        byte = ctx.load::<u8>(ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12 + i + logger_off).expect("valid X-Api-Version byte");            
+                        byte = ctx.load::<u8>(TCP_DATA + i + logger_off).expect("valid X-Api-Version byte");            
                         let mut l = 0;
                         if byte == JNDI[l] {
                             for l in 1..JNDI.len() {
-                                byte = ctx.load::<u8>(ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12 + i + logger_off + l).expect("valid X-Api-Version byte");
+                                byte = ctx.load::<u8>(TCP_DATA + i + logger_off + l).expect("valid X-Api-Version byte");
                                 if byte != JNDI[l] {
                                     return lookup;
                                 }
@@ -331,13 +335,14 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
                         
                             l = JNDI.len();
                             for m in 0..LDAP.len() {
-                                byte = ctx.load::<u8>(ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12 + i + logger_off + l + m).expect("valid X-Api-Version byte");
+                                byte = ctx.load::<u8>(TCP_DATA + i + logger_off + l + m).expect("valid X-Api-Version byte");
                                 if byte != LDAP[m] {
                                     //return byte as u32;
                                     return lookup;
                                 }
-                            }
-                            lookup = 2;
+                            } // found '${jndi:ldap' pattern
+                            // Testing!
+                            // lookup = 2;
                         }
                     }
                 }
@@ -370,7 +375,7 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
     if unsafe { is_blocked(saddr)} {
         ctxdrop = 1;
     } else if ip_proto == IPPROTO_TCP {
-        einfo = unsafe { bef_dpi(&ctx) /*inspect_data(&ctx)*/ };
+        einfo = unsafe { bef_dpi(&ctx) };
         match einfo {
             1 => unsafe { LOOKUPS.insert(&daddr, &1, 0).expect("new lookup"); },
             2 => ctxdrop = 1,
