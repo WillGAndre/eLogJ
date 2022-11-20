@@ -77,7 +77,7 @@ static mut WHLIST: HashMap<u32, u32> = HashMap::with_max_entries(1024, 0);
 static mut BLOCKLIST: HashMap<u32, u32> = HashMap::with_max_entries(1024, 0);
 
 #[map(name = "LOOKUPS")]
-static mut LOOKUPS: HashMap<u32, usize> = HashMap::with_max_entries(1, 0);
+static mut LOOKUPS: HashMap<u32, u32> = HashMap::with_max_entries(1, 0);
 
 #[inline(always)]
 unsafe fn is_verified(key: u32) -> bool {
@@ -106,25 +106,45 @@ unsafe fn block_addr(key: u32) {
 }
 
 // Update RTX
-// TODO: Change Option to Result + Refactor
 #[inline(always)]
 unsafe fn update_RTX(key: u32) -> Option<u32> {
     let val = RTX.get(&key);
     if val.is_some() {
-        let mut count: u32 = *val.expect("failed to unwrap value");
+        let mut count: u32 = *val.expect("failed to unwrap RTX count");
         count += 1;
         match RTX.insert(&key, &count, 0) {
-            Ok(_) => {},
+            Ok(_) => return Some(count),
             Err(_) => return None,
         }
-        return Some(count)
     }
 
     match RTX.insert(&key, &1, 0) {
-        Ok(_) => {},
+        Ok(_) => return Some(1),
         Err(_) => return None,
     }
-    Some(1)
+}
+
+// Update LOOKUPS
+#[inline(always)]
+unsafe fn update_LOOKUPS(key: u32, add: bool) -> Option<u32> {
+    let val = LOOKUPS.get(&key);
+    if val.is_some() {
+        let mut count: u32 = *val.expect("failed to unwrap LOOKUPS count");
+        if add {
+            count += 1;
+        } else if count > 0 {
+            count -= 1;
+        }
+        match RTX.insert(&key, &count, 0) {
+            Ok(_) => return Some(count),
+            Err(_) => return None,
+        }
+    }
+
+    match LOOKUPS.insert(&key, &1, 0) {
+        Ok(_) => return Some(1),
+        Err(_) => return None,
+    }
 }
 
 // INGRESS
@@ -151,6 +171,29 @@ unsafe fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
     Ok((start + offset) as *const T)
 }
 
+
+// TODO: get dport (block LDAP ports --> confidence levels)
+/*
+                    Note: Pointer arithemtic isn't allowed while scanning.
+                        733: (07) r2 += -67
+                        R2 pointer arithmetic on pkt_end prohibited
+                        verification time 13989 usec
+                        stack depth 32
+                        processed 793 insns (limit 1000000) max_states_per_insn 1 total_states 20 peak_states 20 mark_read 7
+
+                    ex:
+                    let mut j = 1;
+                    for i in 1..HTTP_GET.len() {
+                        byte = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
+                        if byte == HTTP_GET[i] {
+                            j += 1;
+                            // todo: err handling
+                        }
+                    }
+                    if j == HTTP_GET.len() { 
+                        info!(&ctx, "\tHTTP GET: payload_size: {}", payload_size);
+                    }
+*/
 fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
     let h_proto = u16::from_be(unsafe {
         *ptr_at(&ctx, offset_of!(ethhdr, h_proto))?
@@ -180,16 +223,12 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
         } else if MODE == 1 {   // Filter HTTP: Specific to the JNDI Exploit (which leverages JNDI lookups using HTTP)
             let payload_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
             if payload_size >= 100 {
-                let mut byte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
+                let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
 
-                // TODO: get dport (block LDAP ports --> confidence levels)
-                if byte == HTTP_GET[0] {
-                    for i in 1..HTTP_GET.len() {
-                        byte = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
-                        if byte != HTTP_GET[i] {
-                            // todo: err handling
-                        }
-
+                if fbyte == HTTP_GET[0] {
+                    let i = HTTP_GET.len() - 1;
+                    let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
+                    if lbyte == HTTP_GET[i] {
                         info!(&ctx, "\tHTTP GET: payload_size: {}", payload_size);
                         match unsafe { LOOKUPS.get(&saddr) } {
                             None => {
@@ -200,17 +239,18 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
                                 ctxdrop = 1;
                                 unsafe { 
                                     block_addr(daddr);
-                                    LOOKUPS.insert(&saddr, &0, 0).expect("ended lookup");
+                                    let r = update_LOOKUPS(saddr, false).unwrap();
+                                    if r == 0 {
+                                        LOOKUPS.remove(&saddr).expect("rm lookup");
+                                    }
                                 };
                             },
                         };
                     }
-                } else if byte == HTTP_RES[0] {
-                    for i in 1..HTTP_RES.len() {
-                        byte = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
-                        if byte != HTTP_RES[i] {
-                            // todo: err handling
-                        }
+                } else if fbyte == HTTP_RES[0] {
+                    let i = HTTP_RES.len() - 1;
+                    let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
+                    if lbyte == HTTP_RES[i] {
                         info!(&ctx, "\tHTTP RESP: payload_size: {}", payload_size);
                     }
                 }
@@ -337,7 +377,6 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
                             for m in 0..LDAP.len() {
                                 byte = ctx.load::<u8>(TCP_DATA + i + logger_off + l + m).expect("valid X-Api-Version byte");
                                 if byte != LDAP[m] {
-                                    //return byte as u32;
                                     return lookup;
                                 }
                             } // found '${jndi:ldap' pattern
@@ -377,7 +416,7 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
     } else if ip_proto == IPPROTO_TCP {
         einfo = unsafe { bef_dpi(&ctx) };
         match einfo {
-            1 => unsafe { LOOKUPS.insert(&daddr, &1, 0).expect("new lookup"); },
+            1 => unsafe { update_LOOKUPS(daddr, true).expect("new lookup"); },
             2 => ctxdrop = 1,
             _ => {},
         };
@@ -409,58 +448,3 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
-
-
-// ---
-
-    // if MODE == 1 {
-    //     if dcount < scount && ip_proto == IPPROTO_TCP {
-    //         // Find HTTP: Specific to the JNDI Exploit (which leverages JNDI lookups using HTTP)
-    //         let payload_size = ((ctx.data_end() - ctx.data()) - (ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12)) as usize;
-    //         if payload_size >= 100 {
-    //             let payload_offset = ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12;
-    //             let byte: u8 = unsafe {
-    //                 *ptr_at(&ctx, payload_offset)?
-    //             };
-
-    //             if byte == HTTP_GET[0] {
-    //                 assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 1)? }, HTTP_GET[1]);
-    //                 assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 2)? }, HTTP_GET[2]);
-    //                 info!(&ctx, "HTTP GET: payload_size: {}", payload_size);
-                    
-    //                 // Drop packet + block addr
-    //                 ctxdrop = 1;
-    //                 unsafe { block_addr(daddr) };
-    //                 // ----
-    //             } else if byte == HTTP_RES[0] {
-    //                 assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 1)? }, HTTP_RES[1]);
-    //                 assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 2)? }, HTTP_RES[2]);
-    //                 assert_eq!(unsafe { *ptr_at::<u8>(&ctx, payload_offset + 3)? }, HTTP_RES[3]);
-    //                 info!(&ctx, "HTTP RESP: payload_size: {}", payload_size);
-    //             }
-    //         }
-    //     } else if unsafe { is_blocked(daddr) } {
-    //         ctxdrop = 1;
-    //     }
-    // } else if MODE == 2 {
-    //     if dcount == 1 && ip_proto == IPPROTO_TCP {
-    //         // ldap ports: 389, 1389
-    //         let sport = u16::from_be(unsafe {
-    //             *ptr_at(&ctx, ETH_HDR_LEN + IP_HDR_LEN + offset_of!(tcphdr, source))?
-    //         });
-    //         let dport = u16::from_be(unsafe {
-    //             *ptr_at(&ctx, ETH_HDR_LEN + IP_HDR_LEN + offset_of!(tcphdr, dest))?
-    //         });
-
-    //         let payload_size = ((ctx.data_end() - ctx.data()) - (ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12)) as usize;
-    //         let payload_byte: u8 = unsafe {
-    //             *ptr_at(&ctx, ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12)?
-    //         };
-
-    //         info!(&ctx, "unexpected tcp packet {} --> {} ; payload_size: {} ; 1st byte: {}", sport, dport, payload_size, payload_byte);
-    //         ctxdrop = 1;
-    //         unsafe { block_addr(daddr) };
-    //     } else if unsafe { is_blocked(daddr) } {
-    //         ctxdrop = 1;
-    //     }
-    // }

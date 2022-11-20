@@ -32,7 +32,7 @@ pub fn get_template_header_offset(payloadkey: &str) -> (usize, usize) {
         hdrlen += k.to_string().len() + v.len() + 4; // +2 - :Space ; +2 - \r\n
     }
     hdrlen += 2;
-    println!("{:#?} len: {}", (nameoff, valueoff), hdrlen);
+    println!("HTTP header logger entry name and payload offsets: {:#?}\nbaseline HTTP len: {}", (nameoff, valueoff), hdrlen);
 
     // let header_dec: Vec<u8> = string_to_decimals(payloadkey).unwrap();
     // let mut f = std::fs::File::create("header-seq.dat").unwrap();
@@ -52,7 +52,7 @@ pub fn get_default_header_offset() -> (u8, u8) {
         hdrlen += k.to_string().len() + v.len() + 4; // +2 - :Space ; +2 - \r\n
     }
     hdrlen += 2;
-    println!("{:#?} len: {}", (nameoff, valueoff), hdrlen);
+    println!("HTTP header logger entry name and payload offsets: {:#?}\nbaseline HTTP header len: {}", (nameoff, valueoff), hdrlen);
     (nameoff.try_into().unwrap(), valueoff.try_into().unwrap())
 }
 
