@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use core::{mem, assert_eq};
+use core::{mem};
 use memoffset::offset_of;
 use aya_bpf::{
     maps::{HashMap, PerfEventArray},
@@ -10,7 +10,7 @@ use aya_bpf::{
     programs::{TcContext, XdpContext},
 };
 use aya_log_ebpf::info;
-use trf_common::EventLog;
+use trf_common::{EventLog};
 
 // for loops requisite:
 use unroll::unroll_for_loops;
@@ -135,7 +135,7 @@ unsafe fn update_LOOKUPS(key: u32, add: bool) -> Option<u32> {
         } else if count > 0 {
             count -= 1;
         }
-        match RTX.insert(&key, &count, 0) {
+        match LOOKUPS.insert(&key, &count, 0) {
             Ok(_) => return Some(count),
             Err(_) => return None,
         }
@@ -203,6 +203,7 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
         return Ok(xdp_action::XDP_PASS)
     }
 
+    let mut elvls = [0u32;2usize];
     let mut ctxdrop: u32 = 0;
     let ip_proto = u8::from_be(unsafe {
         *ptr_at(&ctx, ETH_HDR_LEN + offset_of!(iphdr, protocol))?
@@ -226,6 +227,9 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
                 let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
 
                 if fbyte == HTTP_GET[0] {
+                    // ---
+                    // elvls[0] = 1;
+                    // ---
                     let i = HTTP_GET.len() - 1;
                     let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
                     if lbyte == HTTP_GET[i] {
@@ -271,7 +275,7 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
         saddr: saddr,
         daddr: daddr,
         edrop: ctxdrop,
-        einfo: 0,
+        elvls: elvls,
     };
 
     unsafe {
@@ -355,7 +359,7 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
 
             let mut lhsoffset = 0;
             i = LOGGER_N_OFFSET as usize;
-            for j in 0..(LOGGER_N_SIZE as usize + 2 - 1) / 2 { // 13 - 'X-Api-Version' Length ; https://stackoverflow.com/a/72442854
+            for j in 0..(LOGGER_N_SIZE as usize + 1) / 2 { // 13 - 'X-Api-Version' Length ; https://stackoverflow.com/a/72442854
                 byte = ctx.load::<u8>(TCP_DATA + i + j).expect("valid header byte");
                 
                 match lookup_hdr(ctx, byte, j+1) {
@@ -402,7 +406,7 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
         return Ok(TC_ACT_PIPE);
     }
 
-    let mut einfo = 0;
+    let mut elvls = [0u32;2usize];
     let mut ctxdrop = 0;
     let ip_proto = u8::from_be(
         ctx.load(ETH_HDR_LEN + offset_of!(iphdr, protocol))
@@ -414,9 +418,12 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
     if unsafe { is_blocked(saddr)} {
         ctxdrop = 1;
     } else if ip_proto == IPPROTO_TCP {
-        einfo = unsafe { bef_dpi(&ctx) };
+        let einfo = unsafe { bef_dpi(&ctx) };
         match einfo {
-            1 => unsafe { update_LOOKUPS(daddr, true).expect("new lookup"); },
+            1 => {
+                elvls[0] = 1;
+                unsafe { update_LOOKUPS(daddr, true).expect("new lookup"); };
+            },
             2 => ctxdrop = 1,
             _ => {},
         };
@@ -427,7 +434,7 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
         saddr: saddr,
         daddr: daddr,
         edrop: ctxdrop,
-        einfo: einfo,
+        elvls: elvls,
     };
 
     unsafe {

@@ -93,9 +93,9 @@ async fn main() -> Result<(), anyhow::Error> {
                     
                     match data.etype {
                         0 => {
-                            info!("ig: {} --> {} drop: {}", saddr, daddr, data.edrop);
+                            info!("ig: {} --> {} drop: {} lvls: {:?}", saddr, daddr, data.edrop, data.elvls);
                         },
-                        1 => info!("eg: {} --> {} drop: {} JNDI: {}", saddr, daddr, data.edrop, data.einfo),
+                        1 => info!("eg: {} --> {} drop: {} lvls: {:?}", saddr, daddr, data.edrop, data.elvls),
                         _ => {},
                     }
                 }
