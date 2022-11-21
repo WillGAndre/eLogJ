@@ -60,11 +60,6 @@ const TCP_HDR_LEN: usize = mem::size_of::<tcphdr>();
 const TCP_DATA: usize = ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12; // +12 (TCP header opts)
 
 #[no_mangle]
-static MODE: u8 = 1;    
-// mode: 1 - drop+block explicit http conns sent after jndi trigger (server log - curl)
-// mode: 2 - drop+block unexpected tcp conns after ...
-
-#[no_mangle]
 static RULE_SET: [u32;4usize] = [0, 0, 0, 0];
 // TODO: rule_set wont work as a global var instead read from file (include)
 /*
@@ -72,6 +67,9 @@ static RULE_SET: [u32;4usize] = [0, 0, 0, 0];
     1: Block LDAP ports (todo)                                        (Future work: custom ports)
     3: Block JNDI lookup (1) / Block JNDI request (2)
     4: Block JNDI:LDAP lookup (1) / Block JNDI:LDAP request (2)
+
+    ex1: [1, 0, 0, 2]
+    ex2: [0, 0, 1, 1]
 */
 
 #[map(name = "EVENTS")]
