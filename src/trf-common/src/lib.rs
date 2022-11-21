@@ -7,7 +7,8 @@ pub struct EventLog {
     pub saddr: u32,
     pub daddr: u32,
     pub edrop: u32,
-    pub elvls: [u32;2usize],
+    pub eovrd: u32,
+    pub elvls: [(u32,u32);2usize],
 }
 // Distinct struct fields may induce padding issues (that why we use the same type - u32)
 

@@ -37,8 +37,8 @@ static LOGGER_N_OFFSET: u8 = 76;
 static LOGGER_P_OFFSET: u8 = 91; // 76 + LOGGER_N_SIZE + 2 (': ')
 
 // JNDI binding
-const JNDI: [u8; 6] = [36, 123, 106, 110, 100, 105];
-const LDAP: [u8; 5] = [58, 108, 100, 97, 112];
+const JNDI: [u8; 6] = [36, 123, 106, 110, 100, 105]; // ${jndi
+const LDAP: [u8; 5] = [58, 108, 100, 97, 112];       // :ldap
 
 // HTTP bindings *1
 const HTTP_RES: [u8; 4] = [72, 84, 84, 80];                 // HTTP/1.1 XXX
@@ -63,6 +63,16 @@ const TCP_DATA: usize = ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12; // +12 (TCP
 static MODE: u8 = 1;    
 // mode: 1 - drop+block explicit http conns sent after jndi trigger (server log - curl)
 // mode: 2 - drop+block unexpected tcp conns after ...
+
+#[no_mangle]
+static RULE_SET: [u32;4usize] = [0, 0, 0, 0];
+// TODO: rule_set wont work as a global var instead read from file (include)
+/*
+    0: Block TCP (1) / Block HTTP (2)                           ---> NOTE: OUTBOUND TRAFFIC ONLY
+    1: Block LDAP ports (todo)                                        (Future work: custom ports)
+    3: Block JNDI lookup (1) / Block JNDI request (2)
+    4: Block JNDI:LDAP lookup (1) / Block JNDI:LDAP request (2)
+*/
 
 #[map(name = "EVENTS")]
 static mut EVENTS: PerfEventArray<EventLog> = PerfEventArray::<EventLog>::with_max_entries(1024, 0);
@@ -203,8 +213,9 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
         return Ok(xdp_action::XDP_PASS)
     }
 
-    let mut elvls = [0u32;2usize];
-    let mut ctxdrop: u32 = 0;
+    let mut elvls = [(0, 0) ; 2usize];
+    let mut ctxdrop = 0;
+    let mut ctxoveride = 0;
     let ip_proto = u8::from_be(unsafe {
         *ptr_at(&ctx, ETH_HDR_LEN + offset_of!(iphdr, protocol))?
     });
@@ -218,55 +229,59 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
     let dcount = unsafe { update_RTX(daddr).expect("Error updating RTX") };
 
     if dcount < scount && ip_proto == IPPROTO_TCP {
-        if MODE == 2 {  // Block unexpected outbound TCP
-            ctxdrop = 1;
-            unsafe { block_addr(daddr) };
-        } else if MODE == 1 {   // Filter HTTP: Specific to the JNDI Exploit (which leverages JNDI lookups using HTTP)
-            let payload_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
-            if payload_size >= 100 {
-                let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
+        let data_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
 
-                if fbyte == HTTP_GET[0] {
-                    // ---
-                    // elvls[0] = 1;
-                    // ---
-                    let i = HTTP_GET.len() - 1;
-                    let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
-                    if lbyte == HTTP_GET[i] {
-                        info!(&ctx, "\tHTTP GET: payload_size: {}", payload_size);
-                        match unsafe { LOOKUPS.get(&saddr) } {
-                            None => {
-                                // block all unexpected GET requests
-                            },
-                            Some(_) => { // Triggered jndi lookup
-                                // Drop packet + block addr
-                                ctxdrop = 1;
-                                unsafe { 
+        if data_size >= 100 {
+            let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
+            if fbyte == HTTP_GET[0] {
+                let i = HTTP_GET.len() - 1;
+                let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
+                if lbyte == HTTP_GET[i] {
+                    match unsafe { LOOKUPS.get(&saddr) } {
+                        None => {
+                            // unexpected GET requests (not triggered by lookup)
+                        },
+                        Some(_) => {
+                            unsafe {
+                                // JNDI / JNDI:LDAP lookup blocked
+                                if RULE_SET[2] == 1 || RULE_SET[3] == 1 {
                                     block_addr(daddr);
-                                    let r = update_LOOKUPS(saddr, false).unwrap();
-                                    if r == 0 {
-                                        LOOKUPS.remove(&saddr).expect("rm lookup");
-                                    }
-                                };
-                            },
-                        };
-                    }
-                } else if fbyte == HTTP_RES[0] {
-                    let i = HTTP_RES.len() - 1;
-                    let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
-                    if lbyte == HTTP_RES[i] {
-                        info!(&ctx, "\tHTTP RESP: payload_size: {}", payload_size);
-                    }
+                                }
+                                let r = update_LOOKUPS(saddr, false).unwrap();
+                                if r == 0 {
+                                    LOOKUPS.remove(&saddr).expect("rm lookup");
+                                }
+                            };
+                        },
+                    };
+                    elvls[0] = (2, 1);
+                }
+            } else if fbyte == HTTP_RES[0] {
+                let i = HTTP_RES.len() - 1;
+                let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
+                if lbyte == HTTP_RES[i] {
+                    // info!(&ctx, "\tHTTP RESP: data_size: {}", data_size);
+                    elvls[0] = (2, 2);
                 }
             }
+        } else {
+            elvls[0] = (1, 0);
         }
-    } else if unsafe { is_blocked(daddr) } {
-        ctxdrop = 1;
+
+        // RULE SET (idx=0): if 1 --> block TCP ; if 2 --> block HTTP
+        if RULE_SET[0] != 0 && RULE_SET[0] == elvls[0].0 {
+            ctxdrop = 1;
+        }
     }
     
+    if unsafe { is_blocked(daddr) } {
+        ctxdrop = 1;
+    }
+
     //override
     if unsafe { is_verified(daddr) } {
         ctxdrop = 0;
+        ctxoveride = 1;
         info!(&ctx, "\tDestination address whlisted");
     }
 
@@ -275,6 +290,7 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
         saddr: saddr,
         daddr: daddr,
         edrop: ctxdrop,
+        eovrd: ctxoveride,
         elvls: elvls,
     };
 
@@ -361,12 +377,12 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
             i = LOGGER_N_OFFSET as usize;
             for j in 0..(LOGGER_N_SIZE as usize + 1) / 2 { // 13 - 'X-Api-Version' Length ; https://stackoverflow.com/a/72442854
                 byte = ctx.load::<u8>(TCP_DATA + i + j).expect("valid header byte");
-                
+            
                 match lookup_hdr(ctx, byte, j+1) {
                     None => lhsoffset += 1,
                     Some(mut logger_off) => {
                         logger_off += lhsoffset;
-                        byte = ctx.load::<u8>(TCP_DATA + i + logger_off).expect("valid X-Api-Version byte");            
+                        byte = ctx.load::<u8>(TCP_DATA + i + logger_off).expect("valid X-Api-Version byte");          
                         let mut l = 0;
                         if byte == JNDI[l] {
                             for l in 1..JNDI.len() {
@@ -376,7 +392,7 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
                                 }
                             } // found JNDI lookup 
                             lookup = 1;
-                        
+
                             l = JNDI.len();
                             for m in 0..LDAP.len() {
                                 byte = ctx.load::<u8>(TCP_DATA + i + logger_off + l + m).expect("valid X-Api-Version byte");
@@ -384,8 +400,7 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
                                     return lookup;
                                 }
                             } // found '${jndi:ldap' pattern
-                            // Testing!
-                            // lookup = 2;
+                            lookup = 2;
                         }
                     }
                 }
@@ -406,8 +421,9 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
         return Ok(TC_ACT_PIPE);
     }
 
-    let mut elvls = [0u32;2usize];
+    let mut elvls = [(0, 0) ; 2usize];
     let mut ctxdrop = 0;
+    let mut ctxoveride = 0;
     let ip_proto = u8::from_be(
         ctx.load(ETH_HDR_LEN + offset_of!(iphdr, protocol))
             .map_err(|_| TC_ACT_PIPE)?,
@@ -418,15 +434,29 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
     if unsafe { is_blocked(saddr)} {
         ctxdrop = 1;
     } else if ip_proto == IPPROTO_TCP {
-        let einfo = unsafe { bef_dpi(&ctx) };
-        match einfo {
-            1 => {
-                elvls[0] = 1;
+        let einfo = unsafe { bef_dpi(&ctx) as usize };
+
+        if einfo != 0 {
+            elvls[einfo - 1] = (1, 0);                  // Future work: Using bef_dpi get ip address inside payload (as u32)
+            if RULE_SET[2] == 1 || RULE_SET[3] == 1 {
                 unsafe { update_LOOKUPS(daddr, true).expect("new lookup"); };
-            },
-            2 => ctxdrop = 1,
-            _ => {},
-        };
+            } else if RULE_SET[2] == 2 || RULE_SET[3] == 2 {
+                ctxdrop = 1;
+            }
+        }
+        // (?) todo    
+        //     if RULE_SET[einfo + 1] == 1 {
+        //         unsafe { update_LOOKUPS(daddr, true).expect("new lookup"); };
+        //     } else if RULE_SET[einfo + 1] == 2 {
+        //         ctxdrop = 1;
+        //     }
+    }
+
+    //override
+    if unsafe { is_verified(saddr) } {
+        ctxdrop = 0;
+        ctxoveride = 1;
+        info!(&ctx, "\tSource address whlisted");
     }
 
     let event = EventLog {
@@ -434,6 +464,7 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
         saddr: saddr,
         daddr: daddr,
         edrop: ctxdrop,
+        eovrd: ctxoveride,
         elvls: elvls,
     };
 
@@ -455,3 +486,49 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
+
+// ingress bk:
+    // if dcount < scount && ip_proto == IPPROTO_TCP {
+    //     if MODE == 2 {  // Block unexpected outbound TCP
+    //         ctxdrop = 1;
+    //         unsafe { block_addr(daddr) };
+    //     } else if MODE == 1 {   // Filter HTTP: Specific to the JNDI Exploit (which leverages JNDI lookups using HTTP)
+    //         let payload_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
+    //         if payload_size >= 100 {
+    //             let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
+
+    //             if fbyte == HTTP_GET[0] {
+    //                 // ---
+    //                 // elvls[0] = 1;
+    //                 // ---
+    //                 let i = HTTP_GET.len() - 1;
+    //                 let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
+    //                 if lbyte == HTTP_GET[i] {
+    //                     info!(&ctx, "\tHTTP GET: payload_size: {}", payload_size);
+    //                     match unsafe { LOOKUPS.get(&saddr) } {
+    //                         None => {
+    //                             // block all unexpected GET requests
+    //                         },
+    //                         Some(_) => { // Triggered jndi lookup
+    //                             // Drop packet + block addr
+    //                             ctxdrop = 1;
+    //                             unsafe { 
+    //                                 block_addr(daddr);
+    //                                 let r = update_LOOKUPS(saddr, false).unwrap();
+    //                                 if r == 0 {
+    //                                     LOOKUPS.remove(&saddr).expect("rm lookup");
+    //                                 }
+    //                             };
+    //                         },
+    //                     };
+    //                 }
+    //             } else if fbyte == HTTP_RES[0] {
+    //                 let i = HTTP_RES.len() - 1;
+    //                 let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
+    //                 if lbyte == HTTP_RES[i] {
+    //                     info!(&ctx, "\tHTTP RESP: payload_size: {}", payload_size);
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }

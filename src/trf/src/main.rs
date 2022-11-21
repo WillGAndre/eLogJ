@@ -16,8 +16,6 @@ use bytes::BytesMut;
 struct Opt {
     #[clap(short, long, default_value = "docker0")] // wlp2s0
     iface: String,
-    #[clap(short, long, default_value = "1")]
-    mode: u8
 }
 
 #[tokio::main]
@@ -25,12 +23,9 @@ async fn main() -> Result<(), anyhow::Error> {
     let opt = Opt::parse();
     
     env_logger::init();
-
     let (nameoff, payloadoff) = get_default_header_offset();
     let headername_size: u32 = (payloadoff - nameoff - 2) as u32;
-    let mode = opt.mode as u8;
     let mut bpf = BpfLoader::new()
-        .set_global("MODE", &mode)
         .set_global("LOGGER_N_SIZE", &headername_size)
         .set_global("LOGGER_N_OFFSET", &nameoff)
         .set_global("LOGGER_P_OFFSET", &payloadoff)
@@ -92,10 +87,8 @@ async fn main() -> Result<(), anyhow::Error> {
                     let daddr = Ipv4Addr::from(data.daddr);
                     
                     match data.etype {
-                        0 => {
-                            info!("ig: {} --> {} drop: {} lvls: {:?}", saddr, daddr, data.edrop, data.elvls);
-                        },
-                        1 => info!("eg: {} --> {} drop: {} lvls: {:?}", saddr, daddr, data.edrop, data.elvls),
+                        0 => info!("ig: {} --> {} elvls: {:?} drop: {} override: {}", saddr, daddr, data.elvls, data.edrop, data.eovrd),
+                        1 => info!("eg: {} --> {} elvls: {:?} drop: {} override: {}", saddr, daddr, data.elvls, data.edrop, data.eovrd),
                         _ => {},
                     }
                 }
