@@ -1,5 +1,7 @@
 # eLogJ
 
+![alt text](https://github.com/WillGAndre/eLogJ/blob/main/image.jpg?raw=true)
+
 ## 0.1
 Rulesets are still hardcoded, check ref (trf-ebpf/src/main.rs).
 > cd src/
