@@ -2,7 +2,7 @@
 
 <img src="https://github.com/WillGAndre/eLogJ/blob/main/elogj.png" width="250">
 
-## 0.1
+# 0.1
 Rulesets are still hardcoded, check ref (trf-ebpf/src/main.rs).
 > cd src/
 
