@@ -28,13 +28,37 @@ use bindings::{ethhdr, iphdr, tcphdr};
  * by knowing the packet offset where this input resides we
  * are able to provide an extra layer of sanitization.
  * Although obsfucated payloads is still an issue.
+ * 
+ * 0 => Logger entry name size
+ * 1 => Logger name offset (start)
+ *
 **/
+const LOGGER_INFO: [usize; 2] = core::include!("../../logger-info/src/header-offset");
+const HEADER_SEQ: [u8; LOGGER_INFO[0]] = core::include!("../../logger-info/src/header-dec-seq");
+// [88,45,65,112,105,45,86,101,114,115,105,111,110];
+
+#[no_mangle]
+static RULE_SET: [u32;4usize] = [0, 0, 0, 0];
+// TODO: rule_set wont work as a global var instead read from file (include)
+/*
+    0: Block TCP (1) / Block HTTP (2)                           ---> NOTE: OUTBOUND TRAFFIC ONLY
+    1: Block LDAP ports (todo)                                        (Future work: custom ports)
+    3: Block JNDI lookup (1) / Block JNDI request (2)
+    4: Block JNDI:LDAP lookup (1) / Block JNDI:LDAP request (2)
+
+    ex1: [1, 0, 0, 2]
+    ex2: [0, 0, 1, 1]
+*/
+
+/*
+Example as global variables (coudn't dynamically update values from userspace)
 #[no_mangle]
 static LOGGER_N_SIZE: u32 = 13;
 #[no_mangle]
 static LOGGER_N_OFFSET: u8 = 76;
 #[no_mangle]
 static LOGGER_P_OFFSET: u8 = 91; // 76 + LOGGER_N_SIZE + 2 (': ')
+*/
 
 // JNDI binding
 const JNDI: [u8; 6] = [36, 123, 106, 110, 100, 105]; // ${jndi
@@ -58,19 +82,6 @@ const ETH_HDR_LEN: usize = mem::size_of::<ethhdr>();
 const IP_HDR_LEN: usize = mem::size_of::<iphdr>();
 const TCP_HDR_LEN: usize = mem::size_of::<tcphdr>();
 const TCP_DATA: usize = ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 12; // +12 (TCP header opts)
-
-#[no_mangle]
-static RULE_SET: [u32;4usize] = [0, 0, 0, 0];
-// TODO: rule_set wont work as a global var instead read from file (include)
-/*
-    0: Block TCP (1) / Block HTTP (2)                           ---> NOTE: OUTBOUND TRAFFIC ONLY
-    1: Block LDAP ports (todo)                                        (Future work: custom ports)
-    3: Block JNDI lookup (1) / Block JNDI request (2)
-    4: Block JNDI:LDAP lookup (1) / Block JNDI:LDAP request (2)
-
-    ex1: [1, 0, 0, 2]
-    ex2: [0, 0, 1, 1]
-*/
 
 #[map(name = "EVENTS")]
 static mut EVENTS: PerfEventArray<EventLog> = PerfEventArray::<EventLog>::with_max_entries(1024, 0);
@@ -326,19 +337,18 @@ pub fn egtrf(ctx: TcContext) -> i32 {
 #[inline(always)]
 #[unroll_for_loops]
 fn lookup_hdr(ctx: &TcContext, mut byte: u8, nxbyteidx: usize) -> Option<usize> { // TODO: Pass nxbyte instead of nxbyteindex
-    // [88,45,65,112,105,45,86,101,114,115,105,111,110];
-    let header_seq = core::include!("../../http-parser/src/header-dec-seq"); // len < LOGGER_N_SIZE
-    let sz: usize = LOGGER_N_SIZE as usize;
+    // let header_seq = core::include!("../../http-parser/src/header-dec-seq");
+    let sz: usize = LOGGER_INFO[0] as usize;
 
     for i in 0..sz {
-        if byte == header_seq[i] {
+        if byte == HEADER_SEQ[i] {
             if i == sz - 1 {
                 return Some(3)
             } else {
                 let j = i + 1;
                 if j < sz {
-                    byte = ctx.load::<u8>(TCP_DATA + (LOGGER_N_OFFSET as usize) + nxbyteidx).expect("valid header byte");
-                    if byte == header_seq[j] {
+                    byte = ctx.load::<u8>(TCP_DATA + (LOGGER_INFO[1] as usize) + nxbyteidx).expect("valid header byte");
+                    if byte == HEADER_SEQ[j] {
                         return Some((i + (sz - j) + 3) as usize) // +2 --> ': ' ; +1 --> payload offset
                     }
                 }
@@ -372,8 +382,8 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
             }
 
             let mut lhsoffset = 0;
-            i = LOGGER_N_OFFSET as usize;
-            for j in 0..(LOGGER_N_SIZE as usize + 1) / 2 { // 13 - 'X-Api-Version' Length ; https://stackoverflow.com/a/72442854
+            i = LOGGER_INFO[1] as usize;
+            for j in 0..(LOGGER_INFO[0] as usize + 1) / 2 { // 13 - 'X-Api-Version' Length ; https://stackoverflow.com/a/72442854
                 byte = ctx.load::<u8>(TCP_DATA + i + j).expect("valid header byte");
             
                 match lookup_hdr(ctx, byte, j+1) {

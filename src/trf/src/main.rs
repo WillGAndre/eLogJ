@@ -1,4 +1,4 @@
-use aya::{include_bytes_aligned, BpfLoader};
+use aya::{include_bytes_aligned, Bpf};
 use anyhow::Context;
 use aya::util::online_cpus;
 use aya::maps::perf::AsyncPerfEventArray;
@@ -23,17 +23,15 @@ async fn main() -> Result<(), anyhow::Error> {
     let opt = Opt::parse();
     
     env_logger::init();
-    let (nameoff, payloadoff) = get_default_header_offset();
-    let headername_size: u32 = (payloadoff - nameoff - 2) as u32;
-    let mut bpf = BpfLoader::new()
-        .set_global("LOGGER_N_SIZE", &headername_size)
-        .set_global("LOGGER_N_OFFSET", &nameoff)
-        .set_global("LOGGER_P_OFFSET", &payloadoff)
-        .load(
-        include_bytes_aligned!(
+    
+    // TODO
+    //let (nameoff, payloadoff) = get_default_header_offset();
+    //let headername_size: u32 = (payloadoff - nameoff - 2) as u32;
+    // ----
+    
+    let mut bpf = Bpf::load(include_bytes_aligned!(
             "../../target/bpfel-unknown-none/debug/trf"
-        ),
-    )?;
+    ))?;
     #[cfg(not(debug_assertions))]
     let mut bpf = Bpf::load(include_bytes_aligned!(
         "../../target/bpfel-unknown-none/release/trf"
