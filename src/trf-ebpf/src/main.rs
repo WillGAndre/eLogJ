@@ -12,7 +12,7 @@ use aya_bpf::{
 use aya_log_ebpf::info;
 use trf_common::{EventLog};
 
-// for loops requisite:
+// unrolls for loops 
 use unroll::unroll_for_loops;
 
 #[allow(non_upper_case_globals)]
@@ -23,7 +23,7 @@ mod bindings;
 use bindings::{ethhdr, iphdr, tcphdr};
 
 /** Logger Offset:
- * Since most Log4j loggers will receive input from some
+ * Since our Log4j logger example receives input from some
  * HTTP header field (or any other protocol for that matter),
  * by knowing the packet offset where this input resides we
  * are able to provide an extra layer of sanitization.
@@ -32,14 +32,20 @@ use bindings::{ethhdr, iphdr, tcphdr};
  * 0 => Logger entry name size
  * 1 => Logger name offset (start)
  *
+ *  Note about Rule set:
+ * I tried several implementations of the current `const RULE_SET`:
+ *      1 - Receiving the rule set dynamically as a cli argument
+ *          (loading it from userspace to kernelspace).
+ *      2 - Storing logger information including the rule set in
+ *          a separate eBPF map (big perf hit).
+ * 
+ *  Current pro/con:
+ * Logger-info is stored in files due to easy accessibility from
+ * userspace and kernelspace. Content from the files is read once.
 **/
 const LOGGER_INFO: [usize; 2] = core::include!("../../logger-info/src/header-offset");
-const HEADER_SEQ: [u8; LOGGER_INFO[0]] = core::include!("../../logger-info/src/header-dec-seq");
-// [88,45,65,112,105,45,86,101,114,115,105,111,110];
-
-#[no_mangle]
-static RULE_SET: [u32;4usize] = [0, 0, 0, 0];
-// TODO: rule_set wont work as a global var instead read from file (include)
+const HEADER_SEQ: [u8; LOGGER_INFO[0]] = core::include!("../../logger-info/src/header-dec-seq"); // [88,45,65,112,105,45,86,101,114,115,105,111,110];
+const RULE_SET: [u32; 4usize] = core::include!("../../logger-info/src/rule-set");
 /*
     0: Block TCP (1) / Block HTTP (2)                           ---> NOTE: OUTBOUND TRAFFIC ONLY
     1: Block LDAP ports (todo)                                        (Future work: custom ports)
@@ -50,31 +56,12 @@ static RULE_SET: [u32;4usize] = [0, 0, 0, 0];
     ex2: [0, 0, 1, 1]
 */
 
-/*
-Example as global variables (coudn't dynamically update values from userspace)
-#[no_mangle]
-static LOGGER_N_SIZE: u32 = 13;
-#[no_mangle]
-static LOGGER_N_OFFSET: u8 = 76;
-#[no_mangle]
-static LOGGER_P_OFFSET: u8 = 91; // 76 + LOGGER_N_SIZE + 2 (': ')
-*/
-
-// JNDI binding
-const JNDI: [u8; 6] = [36, 123, 106, 110, 100, 105]; // ${jndi
-const LDAP: [u8; 5] = [58, 108, 100, 97, 112];       // :ldap
-
-// HTTP bindings *1
+// Payload bindings
+const JNDI: [u8; 6] = [36, 123, 106, 110, 100, 105];        // ${jndi
+const LDAP: [u8; 5] = [58, 108, 100, 97, 112];              // :ldap
+// HTTP bindings
 const HTTP_RES: [u8; 4] = [72, 84, 84, 80];                 // HTTP/1.1 XXX
 const HTTP_GET: [u8; 3] = [71, 69, 84];                     // GET XXX
-// ----
-
-/**
- * Notes:
- *  Current ingress/egress config is relative to docker0 interface.
- *  (if control flow is needed to be switched check comments)-
-**/
-// tcp probe tracepoint --> /sys/kernel/debug/tracing/events/tcp/tcp_probe
 
 const IPPROTO_TCP: u8 = 6; // 0x0006
 const ETH_P_IP: u16 = 0x0800;
@@ -124,7 +111,7 @@ unsafe fn block_addr(key: u32) {
     }
 }
 
-// Update RTX
+// Update RTX w/ internal counter, returns count.
 #[inline(always)]
 unsafe fn update_RTX(key: u32) -> Option<u32> {
     let val = RTX.get(&key);
@@ -143,7 +130,13 @@ unsafe fn update_RTX(key: u32) -> Option<u32> {
     }
 }
 
-// Update LOOKUPS
+/** (eBPF map) LOOKUPS:
+ * Single key/value hashmap used to update an 
+ * internal counter that indicates the number
+ * of lookups. Counter is inc/decremented
+ * accordingly (as well as removed) so that
+ * state integrity may be sanitized/maintained. (future work -> ebpf LSM)
+**/
 #[inline(always)]
 unsafe fn update_LOOKUPS(key: u32, add: bool) -> Option<u32> {
     let val = LOOKUPS.get(&key);
@@ -192,27 +185,15 @@ unsafe fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
 
 
 // TODO: get dport (block LDAP ports --> confidence levels)
-/*
-                    Note: Pointer arithemtic isn't allowed while scanning.
-                        733: (07) r2 += -67
-                        R2 pointer arithmetic on pkt_end prohibited
-                        verification time 13989 usec
-                        stack depth 32
-                        processed 793 insns (limit 1000000) max_states_per_insn 1 total_states 20 peak_states 20 mark_read 7
 
-                    ex:
-                    let mut j = 1;
-                    for i in 1..HTTP_GET.len() {
-                        byte = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
-                        if byte == HTTP_GET[i] {
-                            j += 1;
-                            // todo: err handling
-                        }
-                    }
-                    if j == HTTP_GET.len() { 
-                        info!(&ctx, "\tHTTP GET: payload_size: {}", payload_size);
-                    }
-*/
+/** (XDP) Ingress traffic:
+ * Looks for unexpected packets (packets that haven't been registered
+ * from egress TC traffic, aka source address from a packet sent to our logger).
+ *
+ * Rule sets (indexes 0 and 1) filter outbound traffic. 
+ * If destination address is whlisted' rule sets are overrided.
+ * 
+**/
 fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
     let h_proto = u16::from_be(unsafe {
         *ptr_at(&ctx, offset_of!(ethhdr, h_proto))?
@@ -311,18 +292,8 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
     }
     Ok(xdp_action::XDP_PASS)
 }
-/* Inverse Logic
-    unsafe {
-        update_RTX(saddr).expect("Error updating RTX");
-        update_RTX(daddr).expect("Error updating RTX");
-        if is_blocked(saddr) {
-            ctxdrop = 1;
-        }
-    }; 
-*/
 
 // --- EGRESS
-
 #[classifier(name="egtrf")]
 pub fn egtrf(ctx: TcContext) -> i32 {
     match try_egtrf(ctx) {
@@ -494,49 +465,3 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
-
-// ingress bk:
-    // if dcount < scount && ip_proto == IPPROTO_TCP {
-    //     if MODE == 2 {  // Block unexpected outbound TCP
-    //         ctxdrop = 1;
-    //         unsafe { block_addr(daddr) };
-    //     } else if MODE == 1 {   // Filter HTTP: Specific to the JNDI Exploit (which leverages JNDI lookups using HTTP)
-    //         let payload_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
-    //         if payload_size >= 100 {
-    //             let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
-
-    //             if fbyte == HTTP_GET[0] {
-    //                 // ---
-    //                 // elvls[0] = 1;
-    //                 // ---
-    //                 let i = HTTP_GET.len() - 1;
-    //                 let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
-    //                 if lbyte == HTTP_GET[i] {
-    //                     info!(&ctx, "\tHTTP GET: payload_size: {}", payload_size);
-    //                     match unsafe { LOOKUPS.get(&saddr) } {
-    //                         None => {
-    //                             // block all unexpected GET requests
-    //                         },
-    //                         Some(_) => { // Triggered jndi lookup
-    //                             // Drop packet + block addr
-    //                             ctxdrop = 1;
-    //                             unsafe { 
-    //                                 block_addr(daddr);
-    //                                 let r = update_LOOKUPS(saddr, false).unwrap();
-    //                                 if r == 0 {
-    //                                     LOOKUPS.remove(&saddr).expect("rm lookup");
-    //                                 }
-    //                             };
-    //                         },
-    //                     };
-    //                 }
-    //             } else if fbyte == HTTP_RES[0] {
-    //                 let i = HTTP_RES.len() - 1;
-    //                 let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
-    //                 if lbyte == HTTP_RES[i] {
-    //                     info!(&ctx, "\tHTTP RESP: payload_size: {}", payload_size);
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }

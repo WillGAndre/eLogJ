@@ -8,7 +8,7 @@ publish = false
 aya = { version = ">=0.11", features=["async_tokio"] }
 aya-log = "0.1"
 trf-common = { path = "../trf-common", features=["user"] }
-http-parser = { path = "../http-parser" }
+logger-info = { path = "../logger-info" }
 anyhow = "1.0.42"
 clap = { version = "3.1", features = ["derive"] }
 env_logger = "0.9"

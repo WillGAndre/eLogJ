@@ -5,7 +5,16 @@ extended Log4j observability tool used to detect and prevent malicious JNDI (/LD
 - Developed with aya (https://github.com/aya-rs/aya) a Rust eBPF library.<br>
 - Use in tandem with https://github.com/christophetd/log4shell-vulnerable-app (baseline).
 
-0.1: Rulesets are still hardcoded, check ref (trf-ebpf/src/main.rs).
+0.1.2: Rulesets added as static file (logger-info).
+
+### Dependencies
+rust stable toolchain: `rustup install stable`
+<br>
+or
+<br>
+rust nightly toolchain: `rustup install nightly`
+<br>
+bpf-linker: `cargo install bpf-linker`
 
 ### Build Userspace:
 > cargo build
@@ -19,6 +28,9 @@ You may also change the target architecture with the `--target` flag
 ### Run:
 > cargo xtask run
 
-<br><br>
+### Verbose:
+> RUST_LOG=info cargo xtask run
+
+<br>
 Note: 
  Heavily WIP, deps/wiki/docs to be added soon.

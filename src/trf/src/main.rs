@@ -8,7 +8,7 @@ use clap::Parser;
 use log::{info, warn};
 use tokio::{signal, task};
 use trf_common::EventLog;
-use http_parser::{get_default_header_offset};
+use logger_info::{get_default_header_offset};
 use std::net::Ipv4Addr;
 use bytes::BytesMut;
 
