@@ -1,0 +1,2 @@
+[workspace]
+members = ["lsm-test", "lsm-test-common", "xtask"]
