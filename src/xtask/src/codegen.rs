@@ -3,7 +3,7 @@ use std::{fs::File, io::Write, path::PathBuf};
 
 pub fn generate() -> Result<(), anyhow::Error> {
     let dir = PathBuf::from("trf-ebpf/src");
-    let names: Vec<&str> = vec!["ethhdr", "iphdr", "tcphdr"];
+    let names: Vec<&str> = vec!["ethhdr", "iphdr", "tcphdr", "task_struct", "bpf_attr", "bpf_cmd"];
     let bindings = aya_tool::generate(
         InputFile::Btf(PathBuf::from("/sys/kernel/btf/vmlinux")),
         &names,

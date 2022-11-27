@@ -5,9 +5,10 @@ use core::{mem};
 use memoffset::offset_of;
 use aya_bpf::{
     maps::{HashMap, PerfEventArray},
+    cty::{c_int, c_uint},
     bindings::{xdp_action, TC_ACT_PIPE, TC_ACT_SHOT},
-    macros::{classifier, xdp, map},
-    programs::{TcContext, XdpContext},
+    macros::{classifier, xdp, map, lsm},
+    programs::{TcContext, XdpContext, LsmContext},
 };
 use aya_log_ebpf::info;
 use trf_common::{EventLog};
@@ -20,7 +21,7 @@ use unroll::unroll_for_loops;
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
 mod bindings;
-use bindings::{ethhdr, iphdr, tcphdr};
+use bindings::{ethhdr, iphdr, tcphdr, bpf_attr, bpf_cmd};
 
 /** Logger Offset:
  * Since our Log4j logger example receives input from some
@@ -457,6 +458,27 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
         return Ok(TC_ACT_SHOT);
     }
     Ok(TC_ACT_PIPE)
+}
+
+// --- LSM
+#[lsm(name="bpflsm")]
+pub fn bpflsm(ctx: LsmContext) -> i32 {
+    match unsafe { try_bpflsm(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+// TODO: Transfer eMON logic
+//Bind bpf map update/delete by pid
+//Block bpf map delete syscalls to certain maps (RTX,...)
+unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {    
+    let cmd: c_int = ctx.arg(0);
+    let attr: *const bpf_attr = ctx.arg(1);
+    let size: c_uint = ctx.arg(2);
+
+    // info!(&ctx, "cmd: {}", cmd);
+    Ok(0)
 }
 
 // ---

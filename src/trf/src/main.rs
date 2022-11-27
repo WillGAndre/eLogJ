@@ -1,8 +1,8 @@
-use aya::{include_bytes_aligned, Bpf};
+use aya::{include_bytes_aligned, Bpf, Btf};
 use anyhow::Context;
 use aya::util::online_cpus;
 use aya::maps::perf::AsyncPerfEventArray;
-use aya::programs::{tc, SchedClassifier, TcAttachType, Xdp, XdpFlags};
+use aya::programs::{tc, SchedClassifier, TcAttachType, Xdp, XdpFlags, Lsm};
 use aya_log::BpfLogger;
 use clap::Parser;
 use log::{info, warn};
@@ -55,6 +55,14 @@ async fn main() -> Result<(), anyhow::Error> {
     let program: &mut SchedClassifier = bpf.program_mut("egtrf").unwrap().try_into()?;
     program.load()?;
     program.attach(&opt.iface, TcAttachType::Egress)?;
+    // ----
+
+    // LSM
+    // btf is used to load /vmlinux metadata; Ref: https://docs.rs/aya/0.10.2/src/aya/obj/btf/btf.rs.html#91-93
+    let btf = Btf::from_sys_fs()?;
+    let program: &mut Lsm = bpf.program_mut("bpflsm").unwrap().try_into()?;
+    program.load("bpf", &btf)?;
+    program.attach()?;
     // ----
 
     // Whitelist ex
