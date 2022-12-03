@@ -4,7 +4,7 @@
 use core::{mem};
 use memoffset::offset_of;
 use aya_bpf::{
-    maps::{HashMap, PerfEventArray},
+    maps::{HashMap, PerfEventArray, Array},
     cty::{c_int, c_uint},
     bindings::{xdp_action, TC_ACT_PIPE, TC_ACT_SHOT},
     macros::{classifier, xdp, map, lsm},
@@ -85,6 +85,7 @@ static mut BLOCKLIST: HashMap<u32, u32> = HashMap::with_max_entries(1024, 0);
 
 #[map(name = "LOOKUPS")]
 static mut LOOKUPS: HashMap<u32, u32> = HashMap::with_max_entries(1, 0);
+
 
 #[inline(always)]
 unsafe fn is_verified(key: u32) -> bool {
@@ -469,10 +470,35 @@ pub fn bpflsm(ctx: LsmContext) -> i32 {
     }
 }
 
-// TODO: Transfer eMON logic
-//Block eBPF program loads (after eLogJ init)
-//Block lookup/updates for whlist map
-//Block bpf map delete syscalls to eBPF maps
+/** LSM Notes
+ * eBPF map manipulation from kernel space
+ * can't be traced using LSM. Although, after booting
+ * eLogJ, user space intervention will always be needed to load
+ * or manipulate state maps, resulting in syscalls that are
+ * tracable by LSM.
+ *
+ * Assuming that eLogJ is the only eBPF tool running
+ * in the system with eBPF map manipulation. Privilege of
+ * loading further eBPF programs/object code (btf) or updating
+ * eBPF maps can be revoked, assuring that no third-party/malicious
+ * intervention is possibly conducted against the integrity of eLogJ.
+**/
+
+/** LSM counter
+ * This counter is the current "bad solution" for booting the
+ * LSM block code (restrictions). It is based on the number of
+ * syscalls the LSM tracer detects right after booting (4 consecutive
+ * ebpf map update elem syscalls), it decrements each expected 
+ * instrusction and boots right after. This way our ebpf code isn't
+ * blocked, aka s!#t implementation of a sleep function.
+ *
+ * TODO: Dockerize eLogJ / check if lsm trace is the same in diff machine
+**/
+#[no_mangle]
+static mut LSM_COUNTER: u32 = 4;
+
+// TODO:
+//Inspect if PID is repeated in LSM counter (more accuracy)     (!!!)
 //Supply "state" tracing
 unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {    
     let cmd: c_int = ctx.arg(0);
@@ -480,18 +506,28 @@ unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {
     let size: c_uint = ctx.arg(2);
 
     // Query file descriptor 
-    let query_fd: bpf_attr__bindgen_ty_13 = attr.task_fd_query;
+    let task: bpf_attr__bindgen_ty_13 = (*attr).task_fd_query;
+    let fd: u32 = task.fd;
+    let pid: u32 = task.pid;
 
-    if cmd == bpf_cmd.BPF_MAP_LOOKUP_ELEM {
+    if LSM_COUNTER > 0 && fd == 0 && cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int {
+        LSM_COUNTER = LSM_COUNTER - 1;
+    } else {
+        // Restrict loading eBPF prog/obj code; Restrict loading eBPF network progs
+        if cmd == bpf_cmd::BPF_BTF_LOAD as c_int || cmd == bpf_cmd::BPF_PROG_LOAD as c_int {
+            return Err(-1);
+        } else if cmd == bpf_cmd::BPF_LINK_CREATE as c_int {
+            return Err(-1);
+        }
 
-    } else if cmd == bpf_cmd.BPF_MAP_UPDATE_ELEM {
-
-    } else if cmd == bpf_cmd.BPF_MAP_DELETE_ELEM {
-
+        // Restrict access to eBPF maps
+        if cmd == bpf_cmd::BPF_MAP_LOOKUP_ELEM as c_int || cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int || 
+        cmd == bpf_cmd::BPF_MAP_DELETE_ELEM as c_int || cmd == bpf_cmd::BPF_OBJ_GET as c_int {
+            return Err(-1);
+        }
     }
 
-
-    // info!(&ctx, "cmd: {}", cmd);
+    info!(&ctx, "cmd: {}; fd: {}; pid: {}", cmd, fd, pid);
     Ok(0)
 }
 
