@@ -21,7 +21,7 @@ use unroll::unroll_for_loops;
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
 mod bindings;
-use bindings::{ethhdr, iphdr, tcphdr, bpf_attr, bpf_cmd};
+use bindings::{ethhdr, iphdr, tcphdr, bpf_attr, bpf_attr__bindgen_ty_13, bpf_cmd};
 
 /** Logger Offset:
  * Since our Log4j logger example receives input from some
@@ -470,12 +470,26 @@ pub fn bpflsm(ctx: LsmContext) -> i32 {
 }
 
 // TODO: Transfer eMON logic
-//Bind bpf map update/delete by pid
-//Block bpf map delete syscalls to certain maps (RTX,...)
+//Block eBPF program loads (after eLogJ init)
+//Block lookup/updates for whlist map
+//Block bpf map delete syscalls to eBPF maps
+//Supply "state" tracing
 unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {    
     let cmd: c_int = ctx.arg(0);
     let attr: *const bpf_attr = ctx.arg(1);
     let size: c_uint = ctx.arg(2);
+
+    // Query file descriptor 
+    let query_fd: bpf_attr__bindgen_ty_13 = attr.task_fd_query;
+
+    if cmd == bpf_cmd.BPF_MAP_LOOKUP_ELEM {
+
+    } else if cmd == bpf_cmd.BPF_MAP_UPDATE_ELEM {
+
+    } else if cmd == bpf_cmd.BPF_MAP_DELETE_ELEM {
+
+    }
+
 
     // info!(&ctx, "cmd: {}", cmd);
     Ok(0)
