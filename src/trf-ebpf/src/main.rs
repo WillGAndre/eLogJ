@@ -86,6 +86,8 @@ static mut BLOCKLIST: HashMap<u32, u32> = HashMap::with_max_entries(1024, 0);
 #[map(name = "LOOKUPS")]
 static mut LOOKUPS: HashMap<u32, u32> = HashMap::with_max_entries(1, 0);
 
+#[map(name = "BOOTPID")]
+static mut BOOTPID: HashMap<u32, u32> = HashMap::with_max_entries(1, 0);
 
 #[inline(always)]
 unsafe fn is_verified(key: u32) -> bool {
@@ -498,7 +500,6 @@ pub fn bpflsm(ctx: LsmContext) -> i32 {
 static mut LSM_COUNTER: u32 = 4;
 
 // TODO:
-//Inspect if PID is repeated in LSM counter (more accuracy)     (!!!)
 //Supply "state" tracing
 unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {    
     let cmd: c_int = ctx.arg(0);
@@ -511,7 +512,13 @@ unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {
     let pid: u32 = task.pid;
 
     if LSM_COUNTER > 0 && fd == 0 && cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int {
-        LSM_COUNTER = LSM_COUNTER - 1;
+        let val = BOOTPID.get(&pid);
+        if val.is_some() {
+            LSM_COUNTER = LSM_COUNTER - 1;
+        } else {
+            BOOTPID.insert(&pid, &1, 0);
+            LSM_COUNTER = LSM_COUNTER - 1;
+        }
     } else {
         // Restrict loading eBPF prog/obj code; Restrict loading eBPF network progs
         if cmd == bpf_cmd::BPF_BTF_LOAD as c_int || cmd == bpf_cmd::BPF_PROG_LOAD as c_int {
@@ -526,6 +533,48 @@ unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {
             return Err(-1);
         }
     }
+
+    // let mut count: u32 = 0;
+    // let val = BOOTPID.get(&pid);
+    // if val.is_some() {
+    //     count = *val.expect("failed to unwrap RTX count");
+    //     count += 1;
+    //     BOOTPID.insert(&pid, &count, 0);
+    // } else if fd == 0 && cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int {
+    //     BOOTPID.insert(&pid, &0, 0);
+    // }
+
+    // if count >= LSM_COUNTER {
+    //     // Restrict loading eBPF prog/obj code; Restrict loading eBPF network progs
+    //     if cmd == bpf_cmd::BPF_BTF_LOAD as c_int || cmd == bpf_cmd::BPF_PROG_LOAD as c_int {
+    //         return Err(-1);
+    //     } else if cmd == bpf_cmd::BPF_LINK_CREATE as c_int {
+    //         return Err(-1);
+    //     }
+
+    //     // Restrict access to eBPF maps
+    //     if cmd == bpf_cmd::BPF_MAP_LOOKUP_ELEM as c_int || cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int || 
+    //     cmd == bpf_cmd::BPF_MAP_DELETE_ELEM as c_int || cmd == bpf_cmd::BPF_OBJ_GET as c_int {
+    //         return Err(-1);
+    //     }
+    // }
+
+    // if LSM_COUNTER > 0 && fd == 0 && cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int {
+    //     LSM_COUNTER = LSM_COUNTER - 1;
+    // } else {
+    //     // Restrict loading eBPF prog/obj code; Restrict loading eBPF network progs
+    //     if cmd == bpf_cmd::BPF_BTF_LOAD as c_int || cmd == bpf_cmd::BPF_PROG_LOAD as c_int {
+    //         return Err(-1);
+    //     } else if cmd == bpf_cmd::BPF_LINK_CREATE as c_int {
+    //         return Err(-1);
+    //     }
+
+    //     // Restrict access to eBPF maps
+    //     if cmd == bpf_cmd::BPF_MAP_LOOKUP_ELEM as c_int || cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int || 
+    //     cmd == bpf_cmd::BPF_MAP_DELETE_ELEM as c_int || cmd == bpf_cmd::BPF_OBJ_GET as c_int {
+    //         return Err(-1);
+    //     }
+    // }
 
     info!(&ctx, "cmd: {}; fd: {}; pid: {}", cmd, fd, pid);
     Ok(0)
