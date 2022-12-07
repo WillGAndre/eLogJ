@@ -516,6 +516,7 @@ unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {
         if val.is_some() {
             LSM_COUNTER = LSM_COUNTER - 1;
         } else {
+            // TODO: get len of hasmap, if len == 0: insert pid && decr LSM_COUNTER; else: continue (ignore)
             BOOTPID.insert(&pid, &1, 0);
             LSM_COUNTER = LSM_COUNTER - 1;
         }
@@ -533,48 +534,6 @@ unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {
             return Err(-1);
         }
     }
-
-    // let mut count: u32 = 0;
-    // let val = BOOTPID.get(&pid);
-    // if val.is_some() {
-    //     count = *val.expect("failed to unwrap RTX count");
-    //     count += 1;
-    //     BOOTPID.insert(&pid, &count, 0);
-    // } else if fd == 0 && cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int {
-    //     BOOTPID.insert(&pid, &0, 0);
-    // }
-
-    // if count >= LSM_COUNTER {
-    //     // Restrict loading eBPF prog/obj code; Restrict loading eBPF network progs
-    //     if cmd == bpf_cmd::BPF_BTF_LOAD as c_int || cmd == bpf_cmd::BPF_PROG_LOAD as c_int {
-    //         return Err(-1);
-    //     } else if cmd == bpf_cmd::BPF_LINK_CREATE as c_int {
-    //         return Err(-1);
-    //     }
-
-    //     // Restrict access to eBPF maps
-    //     if cmd == bpf_cmd::BPF_MAP_LOOKUP_ELEM as c_int || cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int || 
-    //     cmd == bpf_cmd::BPF_MAP_DELETE_ELEM as c_int || cmd == bpf_cmd::BPF_OBJ_GET as c_int {
-    //         return Err(-1);
-    //     }
-    // }
-
-    // if LSM_COUNTER > 0 && fd == 0 && cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int {
-    //     LSM_COUNTER = LSM_COUNTER - 1;
-    // } else {
-    //     // Restrict loading eBPF prog/obj code; Restrict loading eBPF network progs
-    //     if cmd == bpf_cmd::BPF_BTF_LOAD as c_int || cmd == bpf_cmd::BPF_PROG_LOAD as c_int {
-    //         return Err(-1);
-    //     } else if cmd == bpf_cmd::BPF_LINK_CREATE as c_int {
-    //         return Err(-1);
-    //     }
-
-    //     // Restrict access to eBPF maps
-    //     if cmd == bpf_cmd::BPF_MAP_LOOKUP_ELEM as c_int || cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int || 
-    //     cmd == bpf_cmd::BPF_MAP_DELETE_ELEM as c_int || cmd == bpf_cmd::BPF_OBJ_GET as c_int {
-    //         return Err(-1);
-    //     }
-    // }
 
     info!(&ctx, "cmd: {}; fd: {}; pid: {}", cmd, fd, pid);
     Ok(0)
