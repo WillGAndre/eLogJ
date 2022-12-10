@@ -498,16 +498,12 @@ pub fn bpflsm(ctx: LsmContext) -> i32 {
  * ebpf map update elem syscalls by the same PID), it decrements each expected 
  * instrusction and boots right after. This way our ebpf code isn't
  * blocked, aka s!#t implementation of a sleep function.
- *
- * TODO: Dockerize eLogJ / check if lsm trace is the same in diff machine
 **/
 const MAX_CALLS: u32 = 4;
 
 #[no_mangle]
 static mut LSM_COUNTER: u32 = MAX_CALLS;
 
-// TODO:
-//Supply "state" tracing
 unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {
     let cmd: c_int = ctx.arg(0);
     let attr: *const bpf_attr = ctx.arg(1);
