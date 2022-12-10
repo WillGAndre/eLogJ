@@ -57,18 +57,18 @@ async fn main() -> Result<(), anyhow::Error> {
     program.attach(&opt.iface, TcAttachType::Egress)?;
     // ----
 
+    // Whitelist ex
+    // let mut whlist: HashMap<_, u32, u32> = HashMap::try_from(bpf.map_mut("WHLIST")?)?;
+    // let temp_addr: u32 = Ipv4Addr::new(1, 1, 1, 1).try_into()?;
+    // whlist.insert(temp_addr, 1, 0)?;
+    // ----
+
     // LSM
     // btf is used to load /vmlinux metadata; Ref: https://docs.rs/aya/0.10.2/src/aya/obj/btf/btf.rs.html#91-93
     let btf = Btf::from_sys_fs()?;
     let program: &mut Lsm = bpf.program_mut("bpflsm").unwrap().try_into()?;
     program.load("bpf", &btf)?;
     program.attach()?;
-    // ----
-
-    // Whitelist ex
-    // let mut whlist: HashMap<_, u32, u32> = HashMap::try_from(bpf.map_mut("WHLIST")?)?;
-    // let temp_addr: u32 = Ipv4Addr::new(1, 1, 1, 1).try_into()?;
-    // whlist.insert(temp_addr, 1, 0)?;
     // ----
 
     // Events

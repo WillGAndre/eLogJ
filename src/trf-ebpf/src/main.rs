@@ -48,14 +48,17 @@ const LOGGER_INFO: [usize; 2] = core::include!("../../logger-info/src/header-off
 const HEADER_SEQ: [u8; LOGGER_INFO[0]] = core::include!("../../logger-info/src/header-dec-seq"); // [88,45,65,112,105,45,86,101,114,115,105,111,110];
 const RULE_SET: [u32; 4usize] = core::include!("../../logger-info/src/rule-set");
 /*
-    0: Block TCP (1) / Block HTTP (2)                           ---> NOTE: OUTBOUND TRAFFIC ONLY
-    1: Block LDAP ports (todo)                                        (Future work: custom ports)
+    0: Block TCP (1) / Block HTTP (2)                           ----> NOTE: OUTBOUND TRAFFIC ONLY
+    1: Block LDAP ports                                        --/   (Future work: custom ports)
     3: Block JNDI lookup (1) / Block JNDI request (2)
     4: Block JNDI:LDAP lookup (1) / Block JNDI:LDAP request (2)
 
     ex1: [1, 0, 0, 2]
     ex2: [0, 0, 1, 1]
 */
+
+// LDAP Ports; Based on: https://www.shodan.io/search/facet?query=LDAP&facet=port
+const LDAP_PORTS: [u16; 5] = [1389, 389, 636, 3268, 8081];
 
 // Payload bindings
 const JNDI: [u8; 6] = [36, 123, 106, 110, 100, 105];        // ${jndi
@@ -223,6 +226,9 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
     let dcount = unsafe { update_RTX(daddr).expect("Error updating RTX") };
 
     if dcount < scount && ip_proto == IPPROTO_TCP {
+        let daddr_port = u16::from_be(unsafe {
+            *ptr_at(&ctx, ETH_HDR_LEN + IP_HDR_LEN + offset_of!(tcphdr, dest))?
+        });
         let data_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
 
         if data_size >= 100 {
@@ -248,18 +254,23 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
                             };
                         },
                     };
-                    elvls[0] = (2, 1);
+                    elvls[0] = (2, 1);  // HTTP GET 
                 }
             } else if fbyte == HTTP_RES[0] {
                 let i = HTTP_RES.len() - 1;
                 let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
                 if lbyte == HTTP_RES[i] {
                     // info!(&ctx, "\tHTTP RESP: data_size: {}", data_size);
-                    elvls[0] = (2, 2);
+                    elvls[0] = (2, 2);  // HTTP Response
                 }
             }
         } else {
-            elvls[0] = (1, 0);
+            elvls[0] = (1, 1);  // TCP Data
+        }
+
+        // RULE SET (idx=1): if 1 --> block LDAP ports
+        if RULE_SET[1] == 1 && LDAP_PORTS.map(|p| p == daddr_port).len() > 0 {
+            ctxdrop = 1;
         }
 
         // RULE SET (idx=0): if 1 --> block TCP ; if 2 --> block HTTP
@@ -417,22 +428,16 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
     if unsafe { is_blocked(saddr)} {
         ctxdrop = 1;
     } else if ip_proto == IPPROTO_TCP {
-        let einfo = unsafe { bef_dpi(&ctx) as usize };
+        let einfo = unsafe { bef_dpi(&ctx) as usize };  // Future work: Using bef_dpi get ip address inside payload (as u32)
 
         if einfo != 0 {
-            elvls[einfo - 1] = (1, 0);                  // Future work: Using bef_dpi get ip address inside payload (as u32)
+            elvls[einfo - 1] = (1, 1);      // Found lookup trigger (einfo=1(elvls[0]) --> JDNI lookup ; einfo=2(elvls[1]) --> JDNI LDAP lookup)       
             if RULE_SET[2] == 1 || RULE_SET[3] == 1 {
                 unsafe { update_LOOKUPS(daddr, true).expect("new lookup"); };
             } else if RULE_SET[2] == 2 || RULE_SET[3] == 2 {
                 ctxdrop = 1;
             }
         }
-        // (?) todo    
-        //     if RULE_SET[einfo + 1] == 1 {
-        //         unsafe { update_LOOKUPS(daddr, true).expect("new lookup"); };
-        //     } else if RULE_SET[einfo + 1] == 2 {
-        //         ctxdrop = 1;
-        //     }
     }
 
     //override
@@ -475,9 +480,9 @@ pub fn bpflsm(ctx: LsmContext) -> i32 {
 /** LSM Notes
  * eBPF map manipulation from kernel space
  * can't be traced using LSM. Although, after booting
- * eLogJ, user space intervention will always be needed to load
- * or manipulate state maps, resulting in syscalls that are
- * tracable by LSM.
+ * eLogJ, external user space intervention will always be 
+ * needed to load or manipulate state maps, resulting in 
+ * syscalls that are tracable by LSM.
  *
  * Assuming that eLogJ is the only eBPF tool running
  * in the system with eBPF map manipulation. Privilege of
@@ -490,23 +495,25 @@ pub fn bpflsm(ctx: LsmContext) -> i32 {
  * This counter is the current "bad solution" for booting the
  * LSM block code (restrictions). It is based on the number of
  * syscalls the LSM tracer detects right after booting (4 consecutive
- * ebpf map update elem syscalls), it decrements each expected 
+ * ebpf map update elem syscalls by the same PID), it decrements each expected 
  * instrusction and boots right after. This way our ebpf code isn't
  * blocked, aka s!#t implementation of a sleep function.
  *
  * TODO: Dockerize eLogJ / check if lsm trace is the same in diff machine
 **/
+const MAX_CALLS: u32 = 4;
+
 #[no_mangle]
-static mut LSM_COUNTER: u32 = 4;
+static mut LSM_COUNTER: u32 = MAX_CALLS;
 
 // TODO:
 //Supply "state" tracing
-unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {    
+unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {
     let cmd: c_int = ctx.arg(0);
     let attr: *const bpf_attr = ctx.arg(1);
     let size: c_uint = ctx.arg(2);
 
-    // Query file descriptor 
+    // Query file descriptor
     let task: bpf_attr__bindgen_ty_13 = (*attr).task_fd_query;
     let fd: u32 = task.fd;
     let pid: u32 = task.pid;
@@ -515,27 +522,33 @@ unsafe fn try_bpflsm(ctx: LsmContext) -> Result<i32, i32> {
         let val = BOOTPID.get(&pid);
         if val.is_some() {
             LSM_COUNTER = LSM_COUNTER - 1;
-        } else {
-            // TODO: get len of hasmap, if len == 0: insert pid && decr LSM_COUNTER; else: continue (ignore)
+            info!(&ctx, "Control step {}/{} --> cmd: {}; fd: {}; pid: {}", MAX_CALLS-LSM_COUNTER, MAX_CALLS, cmd, fd, pid);
+        } else if LSM_COUNTER == MAX_CALLS {
             BOOTPID.insert(&pid, &1, 0);
             LSM_COUNTER = LSM_COUNTER - 1;
+            info!(&ctx, "Control step {}/{} --> cmd: {}; fd: {}; pid: {}", MAX_CALLS-LSM_COUNTER, MAX_CALLS, cmd, fd, pid);
+        }
+        if LSM_COUNTER == 0 {
+            info!(&ctx, "|===> LSM bpf syscall hook up\n");
         }
     } else {
-        // Restrict loading eBPF prog/obj code; Restrict loading eBPF network progs
-        if cmd == bpf_cmd::BPF_BTF_LOAD as c_int || cmd == bpf_cmd::BPF_PROG_LOAD as c_int {
-            return Err(-1);
-        } else if cmd == bpf_cmd::BPF_LINK_CREATE as c_int {
-            return Err(-1);
-        }
+        // NOTE: restricting BPF code boot is unstable
+        // Restrict loading BPF prog/obj code; Restrict loading BPF network progs
+        // if cmd == bpf_cmd::BPF_BTF_LOAD as c_int || cmd == bpf_cmd::BPF_PROG_LOAD as c_int {
+        //     info!(&ctx, "Blocked --> cmd: {}; fd: {}; pid: {}", cmd, fd, pid);
+        //     return Err(-1);
+        // } else if cmd == bpf_cmd::BPF_LINK_CREATE as c_int {
+        //     info!(&ctx, "Blocked --> cmd: {}; fd: {}; pid: {}", cmd, fd, pid);
+        //     return Err(-1);
+        // }
 
         // Restrict access to eBPF maps
         if cmd == bpf_cmd::BPF_MAP_LOOKUP_ELEM as c_int || cmd == bpf_cmd::BPF_MAP_UPDATE_ELEM as c_int || 
         cmd == bpf_cmd::BPF_MAP_DELETE_ELEM as c_int || cmd == bpf_cmd::BPF_OBJ_GET as c_int {
+            info!(&ctx, "Blocked --> cmd: {}; fd: {}; pid: {}", cmd, fd, pid);
             return Err(-1);
         }
     }
-
-    info!(&ctx, "cmd: {}; fd: {}; pid: {}", cmd, fd, pid);
     Ok(0)
 }
 
