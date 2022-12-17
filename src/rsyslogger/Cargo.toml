@@ -1,0 +1,11 @@
+[package]
+name = "rsyslogger"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+syslog = "^6.0"
+
+[lib]
+path = "src/lib.rs"
