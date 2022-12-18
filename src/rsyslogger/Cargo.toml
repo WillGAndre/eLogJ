@@ -5,7 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-syslog = "^6.0"
 
 [lib]
 path = "src/lib.rs"

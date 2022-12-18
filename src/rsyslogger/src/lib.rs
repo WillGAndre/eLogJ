@@ -1,26 +1,12 @@
-extern crate syslog;
+use std::process::Command;
 
 // https://docs.rs/syslog/latest/syslog/
 
-#[cfg(test)]
-mod tests {
-    use syslog::{Facility, Formatter3164};
+// Add auto config to rsyslog file: https://wazuh.com/blog/how-to-configure-rsyslog-client-to-send-events-to-wazuh/
 
-    #[test]
-    fn logger_test() {
-        let formatter = Formatter3164 {
-            facility: Facility::LOG_USER,
-            hostname: None,
-            process: "myprogram".into(),
-            pid: 42,
-          };
-        
-        match syslog::unix(formatter) {
-            Err(e)         => println!("impossible to connect to syslog: {:?}", e),
-            Ok(mut writer) => {
-              writer.err("hello world").expect("could not write error message");
-              println!("message to logger sent")
-            }
-        }
-    }
+pub fn remote_log() {
+    Command::new("logger")
+        .arg("{\"app\":\"core\",\"message\":\"Login failed: 'admin' (Remote IP: '127.0.0.1', X-Forwarded-For: '')\",\"level\":2,\"time\":\"2015-06-09T08:16:29+00:00\",\"@source\":\"ownCloud\"}")
+        .spawn()
+        .expect("sh command failed to start");
 }

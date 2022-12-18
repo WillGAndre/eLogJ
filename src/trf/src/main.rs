@@ -11,6 +11,7 @@ use trf_common::EventLog;
 use logger_info::{get_default_header_offset};
 use std::net::Ipv4Addr;
 use bytes::BytesMut;
+use rsyslogger::remote_log;
 
 #[derive(Debug, Parser)]
 struct Opt {
@@ -22,6 +23,9 @@ struct Opt {
 async fn main() -> Result<(), anyhow::Error> {
     let opt = Opt::parse();
     
+    // debug
+    // remote_log();
+
     env_logger::init();
     
     // TODO
