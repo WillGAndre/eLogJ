@@ -50,8 +50,8 @@ const RULE_SET: [u32; 4usize] = core::include!("../../logger-info/src/rule-set")
 /*
     0: Block TCP (1) / Block HTTP (2)                           ----> NOTE: OUTBOUND TRAFFIC ONLY
     1: Block LDAP ports                                        --/   (Future work: custom ports)
-    3: Block JNDI lookup (1) / Block JNDI request (2)
-    4: Block JNDI:LDAP lookup (1) / Block JNDI:LDAP request (2)
+    2: Block JNDI lookup (1) / Block JNDI request (2)
+    3: Block JNDI:LDAP lookup (1) / Block JNDI:LDAP request (2)
 
     ex1: [1, 0, 0, 2]
     ex2: [0, 0, 1, 1]
@@ -210,7 +210,9 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
         return Ok(xdp_action::XDP_PASS)
     }
 
-    let mut elvls = [(0, 0) ; 2usize];
+    let mut eroute = [0u32 ; 2usize];
+    let mut eaction = [0u32 ; 2usize];
+    let mut elvls = [0u32 ; 3usize];
     let mut ctxdrop = 0;
     let mut ctxoveride = 0;
     let ip_proto = u8::from_be(unsafe {
@@ -222,11 +224,12 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
     let daddr = u32::from_be(unsafe {
         *ptr_at(&ctx, ETH_HDR_LEN + offset_of!(iphdr, daddr))?
     });
+    let mut daddr_port: u16 = 0;
     let scount = unsafe { update_RTX(saddr).expect("Error updating RTX") }; // baseline
     let dcount = unsafe { update_RTX(daddr).expect("Error updating RTX") };
 
     if dcount < scount && ip_proto == IPPROTO_TCP {
-        let daddr_port = u16::from_be(unsafe {
+        daddr_port = u16::from_be(unsafe {
             *ptr_at(&ctx, ETH_HDR_LEN + IP_HDR_LEN + offset_of!(tcphdr, dest))?
         });
         let data_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
@@ -254,29 +257,28 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
                             };
                         },
                     };
-                    elvls[0] = (2, 1);  // HTTP GET 
+                    elvls[1] = 1;  // HTTP GET 
                 }
             } else if fbyte == HTTP_RES[0] {
                 let i = HTTP_RES.len() - 1;
                 let lbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + i)? };
                 if lbyte == HTTP_RES[i] {
                     // info!(&ctx, "\tHTTP RESP: data_size: {}", data_size);
-                    elvls[0] = (2, 2);  // HTTP Response
+                    elvls[1] = 2;  // HTTP Response
                 }
             }
-        } else {
-            elvls[0] = (1, 1);  // TCP Data
         }
+        elvls[0] = 1  // TCP Data
+    }
 
-        // RULE SET (idx=1): if 1 --> block LDAP ports
-        if RULE_SET[1] == 1 && LDAP_PORTS.map(|p| p == daddr_port).len() > 0 {
-            ctxdrop = 1;
-        }
+    // RULE SET (idx=1): if 1 --> block LDAP ports
+    if RULE_SET[1] == 1 && LDAP_PORTS.map(|p| p == daddr_port).len() > 0 {
+        ctxdrop = 1;
+    }
 
-        // RULE SET (idx=0): if 1 --> block TCP ; if 2 --> block HTTP
-        if RULE_SET[0] != 0 && RULE_SET[0] == elvls[0].0 {
-            ctxdrop = 1;
-        }
+    // RULE SET (idx=0): if 1 --> block TCP ; if 2 --> block HTTP
+    if RULE_SET[0] != 0 && RULE_SET[0] == elvls[0] || (RULE_SET[0] == 2 && elvls[1] <= RULE_SET[0]) {
+        ctxdrop = 1;   
     }
     
     if unsafe { is_blocked(daddr) } {
@@ -290,12 +292,15 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
         info!(&ctx, "\tDestination address whlisted");
     }
 
+    eaction[0] = ctxdrop;
+    eaction[1] = ctxoveride;
+    eroute[0] = saddr; // TODO saddr_port
+    eroute[1] = daddr;
+
     let event = EventLog {
         etype: 0,
-        saddr: saddr,
-        daddr: daddr,
-        edrop: ctxdrop,
-        eovrd: ctxoveride,
+        eroute: eroute,
+        eaction: eaction,
         elvls: elvls,
     };
 
@@ -345,14 +350,15 @@ fn lookup_hdr(ctx: &TcContext, mut byte: u8, nxbyteidx: usize) -> Option<usize> 
 }
 
 
-/** Left hand side offet: 
+/** Left hand side offet (lhsoffset): 
   * Incremented for each byte not considered, since our logger offset will be
   * relative to the beginning of the header name field.
  **/
 #[inline(always)]
 #[unroll_for_loops]
-unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
-    let mut lookup = 0;
+unsafe fn bef_dpi(ctx: &TcContext) -> (u32, u32) {         // TODO: Search for LDAP packets
+    let mut lookup: u32 = 0;
+    let mut re_match: u32 = 0; // regex match - `${`
 
     match ctx.load::<u8>(TCP_DATA) {
         Err(_) => {},
@@ -362,7 +368,7 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
                 for i in 1..HTTP_GET.len() {
                     byte = ctx.load::<u8>(TCP_DATA + i).expect("valid GET byte");
                     if byte != HTTP_GET[i] {
-                        return lookup;
+                        return (re_match, lookup);
                     }
                 } // found GET request
             }
@@ -382,8 +388,9 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
                             for l in 1..JNDI.len() {
                                 byte = ctx.load::<u8>(TCP_DATA + i + logger_off + l).expect("valid X-Api-Version byte");
                                 if byte != JNDI[l] {
-                                    return lookup;
+                                    return (re_match, lookup);
                                 }
+                                re_match = 1;
                             } // found JNDI lookup 
                             lookup = 1;
 
@@ -391,7 +398,7 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
                             for m in 0..LDAP.len() {
                                 byte = ctx.load::<u8>(TCP_DATA + i + logger_off + l + m).expect("valid X-Api-Version byte");
                                 if byte != LDAP[m] {
-                                    return lookup;
+                                    return (re_match, lookup);
                                 }
                             } // found '${jndi:ldap' pattern
                             lookup = 2;
@@ -402,7 +409,7 @@ unsafe fn bef_dpi(ctx: &TcContext) -> u32 {
         },
     }
 
-    lookup as u32
+    (re_match, lookup)
 }
 
 fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
@@ -415,7 +422,10 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
         return Ok(TC_ACT_PIPE);
     }
 
-    let mut elvls = [(0, 0) ; 2usize];
+    let mut einfo = (0, 0);
+    let mut eroute = [0u32; 2usize];
+    let mut eaction = [0u32 ; 2usize];
+    let mut elvls = [0u32 ; 3usize];
     let mut ctxdrop = 0;
     let mut ctxoveride = 0;
     let ip_proto = u8::from_be(
@@ -428,10 +438,14 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
     if unsafe { is_blocked(saddr)} {
         ctxdrop = 1;
     } else if ip_proto == IPPROTO_TCP {
-        let einfo = unsafe { bef_dpi(&ctx) as usize };  // Future work: Using bef_dpi get ip address inside payload (as u32)
+        einfo = unsafe { bef_dpi(&ctx) };  // Future work: Using bef_dpi get ip address inside payload (as u32)
+    }
 
-        if einfo != 0 {
-            elvls[einfo - 1] = (1, 1);      // Found lookup trigger (einfo=1(elvls[0]) --> JDNI lookup ; einfo=2(elvls[1]) --> JDNI LDAP lookup)       
+    if einfo != (0, 0) {
+        elvls[0] = einfo.0;     // Regex match for `${`
+        elvls[1] = einfo.1;     // Found JNDI / JNDI:LDAP lookup (1/2)
+
+        if elvls[1] >= 1 {      // Blocking request/lookup JNDI will also block JDNI:LDAP 
             if RULE_SET[2] == 1 || RULE_SET[3] == 1 {
                 unsafe { update_LOOKUPS(daddr, true).expect("new lookup"); };
             } else if RULE_SET[2] == 2 || RULE_SET[3] == 2 {
@@ -447,12 +461,15 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
         info!(&ctx, "\tSource address whlisted");
     }
 
+    eaction[0] = ctxdrop;
+    eaction[1] = ctxoveride;
+    eroute[0] = saddr; // TODO saddr_port
+    eroute[1] = daddr; // TODO daddr_port
+
     let event = EventLog {
         etype: 1,
-        saddr: saddr,
-        daddr: daddr,
-        edrop: ctxdrop,
-        eovrd: ctxoveride,
+        eroute: eroute,
+        eaction: eaction,
         elvls: elvls,
     };
 

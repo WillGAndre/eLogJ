@@ -93,12 +93,12 @@ async fn main() -> Result<(), anyhow::Error> {
                     let ptr = buf.as_ptr() as *const EventLog;
                     let data = unsafe { ptr.read_unaligned() }; // read_unaligned --> reads data to EventLog
 
-                    let saddr = Ipv4Addr::from(data.saddr);
-                    let daddr = Ipv4Addr::from(data.daddr);
+                    let saddr = Ipv4Addr::from(data.eroute[0]);
+                    let daddr = Ipv4Addr::from(data.eroute[1]);
                     
                     match data.etype {
-                        0 => info!("ig: {} --> {} elvls: {:?} drop: {} override: {}", saddr, daddr, data.elvls, data.edrop, data.eovrd),
-                        1 => info!("eg: {} --> {} elvls: {:?} drop: {} override: {}", saddr, daddr, data.elvls, data.edrop, data.eovrd),
+                        0 => info!("ig: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction),
+                        1 => info!("eg: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction),
                         _ => {},
                     }
                 }
