@@ -224,6 +224,9 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
     let daddr = u32::from_be(unsafe {
         *ptr_at(&ctx, ETH_HDR_LEN + offset_of!(iphdr, daddr))?
     });
+    let saddr_port = u16::from_be(unsafe {
+        *ptr_at(&ctx, ETH_HDR_LEN + IP_HDR_LEN + offset_of!(tcphdr, source))?
+    });
     let mut daddr_port: u16 = 0;
     let scount = unsafe { update_RTX(saddr).expect("Error updating RTX") }; // baseline
     let dcount = unsafe { update_RTX(daddr).expect("Error updating RTX") };
@@ -269,6 +272,43 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
             }
         }
         elvls[0] = 1  // TCP Data
+    } else if ip_proto == IPPROTO_TCP && LDAP_PORTS.iter().any(|p| p == &saddr_port) { // LDAP Data
+        /*
+            Every LDAP packet data starts with the character '0' (byte - 48, ref: ascii table).
+            Assuming that LDAP is running on a native port, using both conditions, shallow/medium
+            packet inspection can occur.
+
+            LDAP Data Format:
+                48 X   -- Beginning of LDAP msg
+                   X X Y'   -- MessageID (Y') 
+                   Y'' X     -- ProtocolOp (Y'')
+
+            Protocol Operations fields are spaced by two bytes. These operations are identifiable
+            by their ID, i.e. 
+                bindRequest - 96 , bindResponse - 97 , unbindRequest - 66
+                searchRequest - 99 , searchResEntry - 100 , searchResDone - 101
+                (as bytes - decimal)
+                
+            In most cases the offset for the ProtocolOp will always be the same (+5), although
+            from testing, it was observable that LDAP searchResEntry packets (with size = 275 bytes)
+            had a +1 offset.    (**1)
+        */
+        let pool: [u8; 6] = [96, 97, 66, 99, 100, 101];
+        let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
+        if fbyte == 48 {
+            let mut msgID: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + 4)? };
+            let mut protocolOp: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + 5)? };
+
+            // test: openldap/*.sh  ;  (**1)
+            if pool.iter().all(|op| op != &protocolOp) {
+                msgID = unsafe { *ptr_at(&ctx, TCP_DATA + 5)? };
+                protocolOp = unsafe { *ptr_at(&ctx, TCP_DATA + 6)? };
+            }
+            // TODO: create field bindings for protocol operations (like bindings.rs).
+            info!(&ctx, "\tLDAP packet: messageID = {} ; protocolOp = {}", fbyte, msgID, protocolOp);
+        }
+
+        //info!(&ctx, "\tSent packet from port in LDAP ; fbyte = {}", fbyte);
     }
 
     // RULE SET (idx=1): if 1 --> block LDAP ports
