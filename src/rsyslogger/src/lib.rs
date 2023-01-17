@@ -10,3 +10,12 @@ pub fn remote_log() {
         .spawn()
         .expect("sh command failed to start");
 }
+
+pub fn local_info_log(msg: &str) {
+    Command::new("logger")
+        .arg("-i").arg("-p")
+        .arg("local6.info")
+        .arg(msg)
+        .spawn()
+        .expect("failed to spawn local_info_log");
+}

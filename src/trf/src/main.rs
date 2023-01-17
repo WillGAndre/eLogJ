@@ -11,7 +11,7 @@ use trf_common::EventLog;
 use logger_info::{get_default_header_offset};
 use std::net::Ipv4Addr;
 use bytes::BytesMut;
-use rsyslogger::remote_log;
+use rsyslogger::{remote_log, local_info_log};
 
 #[derive(Debug, Parser)]
 struct Opt {
@@ -24,7 +24,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let opt = Opt::parse();
     
     // debug
-    // remote_log();
+    //remote_log();
+    local_info_log("elogj-sample-info-test");
 
     env_logger::init();
     
