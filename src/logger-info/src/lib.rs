@@ -1,5 +1,7 @@
 use std::{fs::File, io::Write};
 use ascii_converter::string_to_decimals;
+use serde::{Serialize, Deserialize};
+use serde_yaml::{self};
 
 trait DefHdrs {
     fn set_default_headers(self) -> Self;
@@ -98,6 +100,27 @@ pub fn get_default_header_offset() -> (u8, u8) {
     println!("HTTP header logger entry name and payload offsets: {:#?}\nbaseline HTTP header len: {}", (nameoff, valueoff), hdrlen);
     (nameoff.try_into().unwrap(), valueoff.try_into().unwrap())
 }
+
+// --- RuleSet yml ---
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TrafficType {
+    traffic_type: String,
+    medium: String,
+    block_type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RuleSet {
+    // log_type: String
+    block: Vec<TrafficType>
+}
+
+// let f = std::fs::File::open("rule-set.yml")
+//         .expect("Could not open file.");
+//     let rules: RuleSet = serde_yaml::from_reader(f)
+//         .expect("Could not read values.");
+//     println!("{:?}", rules);
 
 #[cfg(test)]
 mod tests {

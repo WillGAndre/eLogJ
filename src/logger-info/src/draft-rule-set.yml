@@ -1,0 +1,20 @@
+block:
+  - traffic_type: Outbound
+    medium: TCP
+    block_type: All
+
+  - traffic_type: Outbound
+    medium: HTTP
+    block_type: All
+
+  - traffic_type: Outbound
+    medium: LDAP
+    block_type: All
+
+  - traffic_type: Inbound
+    medium: JNDI
+    block_type: lookup
+
+  - traffic_type: Inbound
+    medium: JNDI:LDAP
+    block_type: request
