@@ -13,6 +13,7 @@ use std::net::Ipv4Addr;
 use bytes::BytesMut;
 use rsyslogger::{remote_log, local_info_log};
 
+// Interface where services are exposed (docker {springboot} {LDAP} - docker0)
 #[derive(Debug, Parser)]
 struct Opt {
     #[clap(short, long, default_value = "docker0")] // wlp2s0
@@ -25,7 +26,7 @@ async fn main() -> Result<(), anyhow::Error> {
     
     // debug
     //remote_log();
-    local_info_log("elogj-sample-info-test");
+    //local_info_log("elogj-sample-info-test");
 
     env_logger::init();
     
