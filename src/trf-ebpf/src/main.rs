@@ -44,9 +44,9 @@ use bindings::{ethhdr, iphdr, tcphdr, bpf_attr, bpf_attr__bindgen_ty_13, bpf_cmd
  * Logger-info is stored in files due to easy accessibility from
  * userspace and kernelspace. Content from the files is read once.
 **/
-const LOGGER_INFO: [usize; 2] = core::include!("../../logger-info/src/header-offset");
-const HEADER_SEQ: [u8; LOGGER_INFO[0]] = core::include!("../../logger-info/src/header-dec-seq"); // [88,45,65,112,105,45,86,101,114,115,105,111,110];
-const RULE_SET: [u32; 4usize] = core::include!("../../logger-info/src/rule-set");
+const LOGGER_INFO: [usize; 2] = core::include!("../../trf-common/header-offset.dat");
+const HEADER_SEQ: [u8; LOGGER_INFO[0]] = core::include!("../../trf-common/header-seq.dat"); // [88,45,65,112,105,45,86,101,114,115,105,111,110];
+const RULE_SET: [u32; 4usize] = core::include!("../../trf-common/rule-set.dat");
 /*
     0: Block TCP (1) / Block HTTP (2)                           ----> NOTE: OUTBOUND TRAFFIC ONLY
     1: Block LDAP ports                                        --/   (Future work: custom ports)

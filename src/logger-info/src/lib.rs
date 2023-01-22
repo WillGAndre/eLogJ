@@ -46,11 +46,10 @@ impl DefHdrs for http::request::Builder {
 pub fn __config_logger_yml(file: &str) {
     let mut f = File::open(file).expect("Could not open file.");
     let rules: RuleSet = serde_yaml::from_reader(f).expect("Could not read values.");
-    let payloadkey = rules.jndi_payload_header;
     let mut ruleset = [0u8; 4usize];
-    f = File::create("rule-set.dat").unwrap();
+    let payloadkey = rules.jndi_payload_header;
+    f = File::create("trf-common/rule-set.dat").unwrap();
 
-    __config_logger_payload(Some(&payloadkey));
     for action in &rules.block {
         if action.traffic_type == "Inbound" {
             if action.medium == "JNDI" {
@@ -76,7 +75,9 @@ pub fn __config_logger_yml(file: &str) {
             }
         }
     }
+    
     write!(f, "{:?}", ruleset).expect("write header offset to file");
+    __config_logger_payload(Some(&payloadkey));
 }
 
 /** Logger config files:
@@ -103,17 +104,17 @@ pub fn __config_logger_payload(payloadkey: Option<&str>) {
 // Write header key length and off-set in: header-offset.dat
 fn write_header(offsets: Vec<u8>, payloadkey: Option<&str>) {
     let mut res = format!("{:?}", offsets);
-    let mut f = File::create("header-offset.dat").unwrap();
+    let mut f = File::create("trf-common/header-offset.dat").unwrap();
     write!(f, "{}", res).expect("write header offset to file");
     if payloadkey == None {
         let header_dec: Vec<u8> = string_to_decimals("X-Api-Version").unwrap();
         res = format!("{:?}", header_dec);
-        f = File::create("header-seq.dat").unwrap();
+        f = File::create("trf-common/header-seq.dat").unwrap();
         write!(f, "{}", res).expect("write header sequence to file");
     } else {
         let header_dec: Vec<u8> = string_to_decimals(payloadkey.unwrap()).unwrap();
         res = format!("{:?}", header_dec);
-        f = File::create("header-seq.dat").unwrap();
+        f = File::create("trf-common/header-seq.dat").unwrap();
         write!(f, "{}", res).expect("write header sequence to file");
     }
 }
