@@ -16,11 +16,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: Build Kernelspace
+      run: |
+        cd /home/runner/work/eLogJ/eLogJ/src
+        cargo xtask build-ebpf --verbose
     - name: Build Userspace
       run: |
         cd /home/runner/work/eLogJ/eLogJ/src
         cargo build --verbose
-    - name: Build Kernelspace
-      run: |
-        cd eLogJ/src
-        cargo xtask build-ebpf --verbose
+        
