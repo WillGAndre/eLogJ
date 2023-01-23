@@ -19,6 +19,8 @@ jobs:
     - name: Build Kernelspace
       run: |
         cd /home/runner/work/eLogJ/eLogJ/src
+        cargo install bpf-linker
+        cargo install --no-default-features --features system-llvm bpf-linker
         cargo xtask build-ebpf --verbose
     - name: Build Userspace
       run: |
