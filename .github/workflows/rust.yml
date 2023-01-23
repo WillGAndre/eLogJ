@@ -20,9 +20,9 @@ jobs:
       run: |
         cd /home/runner/work/eLogJ/eLogJ/src
         cargo install bpf-linker
-        cargo xtask build-ebpf --verbose
+        cargo xtask build-ebpf
     - name: Build Userspace
       run: |
         cd /home/runner/work/eLogJ/eLogJ/src
-        cargo build --verbose
+        cargo build
         
