@@ -43,7 +43,7 @@ impl DefHdrs for http::request::Builder {
 
 // Main configuation file: parses yaml to the necessary config files:
 // rule-set.dat, header-dec-seq.dat and header-offset.dat
-pub fn __config_logger_yml(file: &str) {
+pub fn __config_logger_yml(file: &str) -> String {
     let mut f = File::open(file).expect("Could not open file.");
     let rules: RuleSet = serde_yaml::from_reader(f).expect("Could not read values.");
     let mut ruleset = [0u8; 4usize];
@@ -78,6 +78,8 @@ pub fn __config_logger_yml(file: &str) {
     
     write!(f, "{:?}", ruleset).expect("write header offset to file");
     __config_logger_payload(Some(&payloadkey));
+
+    return rules.log_type
 }
 
 /** Logger config files:

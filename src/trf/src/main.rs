@@ -11,7 +11,7 @@ use trf_common::EventLog;
 use logger_info::{__config_logger_yml};
 use std::net::Ipv4Addr;
 use bytes::BytesMut;
-use rsyslogger::{remote_log, local_info_log};
+use rsyslogger::{remote_log, local_info_log, __init_rsysloggerd};
 
 // Interface where services are exposed (docker {springboot} {LDAP} - docker0)
 #[derive(Debug, Parser)]
@@ -22,9 +22,12 @@ struct Opt {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    __config_logger_yml("draft-rule-set-default.yml");
+    let log_type: String = __config_logger_yml("draft-rule-set-default.yml");
+
+    // Create Rsysloggerd
+    let rsyslogd = __init_rsysloggerd(log_type);
     let opt = Opt::parse();
-    
+
     // debug
     //remote_log();
     //local_info_log("elogj-sample-info-test");
@@ -73,7 +76,7 @@ async fn main() -> Result<(), anyhow::Error> {
     program.attach()?;
     // ----
 
-    // Events - TODO: mid-level parsing; send event as json
+    // Events - TODO: mid-level parsing; parse events -- distinguish between action and info events
     let mut perf_array = AsyncPerfEventArray::try_from(bpf.map_mut("EVENTS")?)?;
     for cpu_id in online_cpus()? {
         let mut buf = perf_array.open(cpu_id, None)?;
@@ -95,8 +98,10 @@ async fn main() -> Result<(), anyhow::Error> {
                     let daddr = Ipv4Addr::from(data.eroute[1]);
                     
                     match data.etype {
-                        0 => info!("ig: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction),
-                        1 => info!("eg: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction),
+                        0 => local_info_log(format!("ig: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction)),
+                        1 => local_info_log(format!("eg: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction)),
+                        //0 => info!("ig: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction),
+                        //1 => info!("eg: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction),
                         _ => {},
                     }
                 }
@@ -107,6 +112,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     info!("Waiting for Ctrl-C...");
     signal::ctrl_c().await?;
+    rsyslogd.__purge();
     info!("Exiting...");
 
     Ok(())
