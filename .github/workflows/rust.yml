@@ -1,0 +1,32 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build Kernelspace
+      run: |
+        cd /home/runner/work/eLogJ/eLogJ/src
+        sudo apt install linux-headers-$(uname -r)
+        sudo apt install clang lldb lld
+        rustup toolchain install nightly
+        rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
+        cargo install bpf-linker
+        cargo xtask build-ebpf
+    - name: Build Userspace
+      run: |
+        cd /home/runner/work/eLogJ/eLogJ/src
+        cargo build
+        
