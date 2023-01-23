@@ -30,7 +30,8 @@ impl Rsysloggerd {
 
     pub fn __purge(&self) {
         if run_cmd! {
-            rm /etc/rsyslog.d/0-filefwd.conf
+            rm /etc/rsyslog.d/0-filefwd.conf;
+            rm /tmp/elogj-info.log;
         }.is_err() {
             println!("error purging");
         }
