@@ -19,6 +19,7 @@ jobs:
     - name: Build Kernelspace
       run: |
         cd /home/runner/work/eLogJ/eLogJ/src
+        apt install clang lldb lld
         rustup toolchain install nightly
         rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
         cargo install --no-default-features --features system-llvm bpf-linker
