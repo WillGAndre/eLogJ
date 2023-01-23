@@ -21,7 +21,7 @@ jobs:
         cd /home/runner/work/eLogJ/eLogJ/src
         rustup toolchain install nightly
         rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
-        cargo install bpf-linker
+        cargo install --no-default-features --features system-llvm bpf-linker
         cargo xtask build-ebpf
     - name: Build Userspace
       run: |
