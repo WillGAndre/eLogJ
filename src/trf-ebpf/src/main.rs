@@ -483,7 +483,12 @@ fn try_egtrf(ctx: TcContext) -> Result<i32, i64> {
 
     if einfo != (0, 0) {
         elvls[0] = einfo.0;     // Regex match for `${`
-        elvls[1] = einfo.1;     // Found JNDI / JNDI:LDAP lookup (1/2)
+        if einfo.1 == 1 {       // Found JNDI / JNDI:LDAP lookup (1/2)
+            elvls[1] = 1;
+        } else if einfo.1 == 2 {
+            elvls[1] = 1;
+            elvls[2] = 1;
+        }
 
         if elvls[1] >= 1 {      // Blocking request/lookup JNDI will also block JDNI:LDAP 
             if RULE_SET[2] == 1 || RULE_SET[3] == 1 {
