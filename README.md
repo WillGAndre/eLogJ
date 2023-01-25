@@ -13,6 +13,7 @@ extended Log4j observability tool used to detect and prevent malicious JNDI (/LD
   . added experimental LSM module (bpf syscall -- blackbox eLogJ)
   .
 0.1.5: Rulesets configured using yaml file.
+0.1.6: "file"/"local" log_type (yaml)
 </pre>
 
 ### Dependencies
