@@ -1,0 +1,36 @@
+name: kernel
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  test_kernel_5-8:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Cache VM
+        uses: actions/cache@v3.0.5
+        id: cache
+        with:
+          path: ./workflows/inner.qcow2
+          key: kernel_5.8.0-63_v3
+      
+      - name: Prepare runner
+        run: sudo ./workflows/prepare_runner.sh
+      
+      - name: Build VM
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo ./workflows/build_vm.sh
+      
+      - name: Launch VM
+        run: sudo ./workflows/install_vm.sh
+
+      - name: Run test script
+        run: ./workflows/test.sh
