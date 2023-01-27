@@ -16,60 +16,26 @@ jobs:
     strategy:
       matrix:
         arch:
-          - x86_64-unknown-linux-gnu
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-      - uses: Swatinem/rust-cache@v1
-      - name: Prereqs
-        run: cargo install cross --git https://github.com/cross-rs/cross
-      - name: Build
-        run: |
-          cd src
-          cross build --verbose --target ${{matrix.arch}}
-      - name: Run test
-        env:
-          RUST_BACKTRACE: full
-        run: |
-          cd src
-          cross test --verbose --target ${{matrix.arch}}
-
-  test:
+          - x86_64
     runs-on: ubuntu-20.04
-    needs: build
 
     steps:
       - uses: actions/checkout@v2
-      - uses: actions/checkout@v2
-        with:
-          repository: libbpf/libbpf
-          path: libbpf
 
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly-2023-01-10
-          components: rustfmt, clippy, rust-src
-          target: x86_64-unknown-linux-musl
+          components: rust-src
           override: true
 
       - uses: Swatinem/rust-cache@v1
 
-      - name: Install Pre-requisites
+      - name: Prereqs
+        run: cargo install bpf-linker
+
+      - name: Build
+        env:
+          CARGO_CFG_BPF_TARGET_ARCH: ${{ matrix.arch }}
         run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-15 main" | sudo tee -a /etc/apt/sources.list
-          sudo apt-get update
-          sudo apt-get -qy install linux-tools-common qemu-system-x86 cloud-image-utils openssh-client libelf-dev gcc-multilib llvm-15 clang-15
-          sudo update-alternatives --install /usr/bin/llvm-objcopy llvm-objcopy /usr/bin/llvm-objcopy-15 200
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 200
-          cargo install bpf-linker
-      
-      - name: Test
-        run: |
-          pwd
-          ls
-          cargo --help
+          cd src
+          cargo xtask build-ebpf
