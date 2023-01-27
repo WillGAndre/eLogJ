@@ -1,13 +1,15 @@
-name: kernel
+name: build-aya
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
+    branches:
+      - main
+      - ci
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-  
+  pull_request:
+    branches:
+      - main
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -16,27 +18,67 @@ jobs:
     strategy:
       matrix:
         arch:
-          - x86_64
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabi
+          - riscv64gc-unknown-linux-gnu
     runs-on: ubuntu-20.04
-
     steps:
       - uses: actions/checkout@v2
 
       - uses: actions-rs/toolchain@v1
         with:
+          toolchain: stable
+          override: true
+
+      - uses: Swatinem/rust-cache@v1
+      - name: Prereqs
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        run: cross build --verbose --target ${{matrix.arch}}
+
+      - name: Run test
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          cross test --verbose --target ${{matrix.arch}}
+
+  test:
+    runs-on: ubuntu-20.04
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
+        with:
+          repository: libbpf/libbpf
+          path: libbpf
+
+      - uses: actions-rs/toolchain@v1
+        with:
           toolchain: nightly-2023-01-10
-          components: rust-src
+          components: rustfmt, clippy, rust-src
+          target: x86_64-unknown-linux-musl
           override: true
 
       - uses: Swatinem/rust-cache@v1
 
-      - name: Prereqs
-        run: cargo install bpf-linker
-
-      - name: Build
-        env:
-          CARGO_CFG_BPF_TARGET_ARCH: ${{ matrix.arch }}
+      - name: Install Pre-requisites
         run: |
-          cd src
-          cargo build -Zbuild-std=core --target=bpfel-unknown-none
-          cargo build -Zbuild-std=core --target=bpfeb-unknown-none
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-15 main" | sudo tee -a /etc/apt/sources.list
+          sudo apt-get update
+          sudo apt-get -qy install linux-tools-common qemu-system-x86 cloud-image-utils openssh-client libelf-dev gcc-multilib llvm-15 clang-15
+          sudo update-alternatives --install /usr/bin/llvm-objcopy llvm-objcopy /usr/bin/llvm-objcopy-15 200
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 200
+          cargo install bpf-linker
+
+      - name: Lint integration tests
+        run: |
+          cargo xtask build-integration-test-ebpf --libbpf-dir ./libbpf
+          cargo clippy -p integration-test -- --deny warnings
+
+      - name: Run integration tests
+        run: |
+          (cd test && ./run.sh ../libbpf)
