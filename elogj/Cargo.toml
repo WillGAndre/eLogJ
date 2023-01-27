@@ -1,2 +1,0 @@
-[workspace]
-members = ["trf", "trf-common", "xtask", "logger-info", "rsyslogger"]

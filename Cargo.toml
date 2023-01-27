@@ -1,5 +1,2 @@
 [workspace]
-
-members = [
-    "elogj"
-]
+members = ["trf", "trf-common", "xtask", "logger-info", "rsyslogger"]
