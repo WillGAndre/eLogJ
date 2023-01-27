@@ -17,9 +17,17 @@ extended Log4j observability tool used to detect and prevent malicious JNDI (/LD
 </pre>
 
 ### Dependencies
-rust stable or nightly toolchain: `rustup install stable` / `rustup install nightly`
+Rust stable and nightly toolchain: 
 <br>
-bpf-linker: `cargo install bpf-linker`
+`rustup install stable`
+<br>
+`rustup toolchain install nightly --component rust-src`
+<br>
+bpf-linker:
+<br>
+`cargo install bpf-linker`
+<br>
+Ref: https://aya-rs.dev/book/start/development/#how-to-use-this-guide
 
 ### Build Userspace:
 > cargo build
