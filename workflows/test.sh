@@ -12,6 +12,8 @@ sshpass -p ubuntu ssh -o "StrictHostKeyChecking=no" "ubuntu@$IP" uname -a
 
 sshpass -p ubuntu ssh "ubuntu@$IP" "pwd; ls"
 
+sshpass -p ubuntu ssh "ubuntu@$IP" "uname -a"
+
 sshpass -p ubuntu ssh "ubuntu@$IP" df -h
 
 sudo virsh shutdown inner
