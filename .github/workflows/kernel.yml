@@ -25,4 +25,5 @@ jobs:
         sudo apt-get install -y make clang llvm libelf-dev
     - name: Test
       run: |
+        ls
         cargo --help
