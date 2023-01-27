@@ -1,4 +1,2 @@
 [alias]
 xtask = "run --package xtask --"
-build-bpfel = "build -Zbuild-std=core --target=bpfel-unknown-none"
-build-bpfeb = "build -Zbuild-std=core --target=bpfeb-unknown-none"

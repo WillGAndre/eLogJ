@@ -1,10 +1,9 @@
-name: build-aya
+name: kernel
 
 on:
   push:
     branches:
       - main
-      - ci
 
   pull_request:
     branches:
@@ -15,67 +14,23 @@ env:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        arch:
-          - x86_64-unknown-linux-gnu
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
 
-      - uses: actions-rs/toolchain@v1
+      - name: Install latest stable
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          override: true
 
-      - uses: Swatinem/rust-cache@v1
-      - name: Prereqs
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build
-        run: cross build --verbose --target ${{matrix.arch}}
-
-      - name: Run test
-        env:
-          RUST_BACKTRACE: full
-        run: |
-          cross test --verbose --target ${{matrix.arch}}
-
-  test:
-    runs-on: ubuntu-20.04
-    needs: build
-
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/checkout@v2
-        with:
-          repository: libbpf/libbpf
-          path: libbpf
-
-      - uses: actions-rs/toolchain@v1
+      - name: Install latest nightly (pinned to nightly-2023-01-10, https://github.com/aya-rs/aya/issues/490)
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly-2023-01-10
-          components: rustfmt, clippy, rust-src
-          target: x86_64-unknown-linux-musl
-          override: true
+          components: rust-src
 
-      - uses: Swatinem/rust-cache@v1
+      - name: Install bpf-linker
+        run: cargo install bpf-linker
 
-      - name: Install Pre-requisites
-        run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-15 main" | sudo tee -a /etc/apt/sources.list
-          sudo apt-get update
-          sudo apt-get -qy install linux-tools-common qemu-system-x86 cloud-image-utils openssh-client libelf-dev gcc-multilib llvm-15 clang-15
-          sudo update-alternatives --install /usr/bin/llvm-objcopy llvm-objcopy /usr/bin/llvm-objcopy-15 200
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 200
-          cargo install bpf-linker
-
-      - name: Lint integration tests
-        run: |
-          cargo xtask build-integration-test-ebpf --libbpf-dir ./libbpf
-          cargo clippy -p integration-test -- --deny warnings
-
-      - name: Run integration tests
-        run: |
-          (cd test && ./run.sh ../libbpf)
+      - name: Run tests
+        run: ./test.sh
