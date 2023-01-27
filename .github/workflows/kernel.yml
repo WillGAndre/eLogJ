@@ -28,5 +28,5 @@ jobs:
         cargo install bpf-linker
     - name: Test
       run: |
-        ls
-        cargo --help
+        cd src
+        cargo xtask build-ebpf
