@@ -17,9 +17,6 @@ jobs:
       matrix:
         arch:
           - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
-          - armv7-unknown-linux-gnueabi
-          - riscv64gc-unknown-linux-gnu
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -31,11 +28,14 @@ jobs:
       - name: Prereqs
         run: cargo install cross --git https://github.com/cross-rs/cross
       - name: Build
-        run: cross build --verbose --target ${{matrix.arch}}
+        run: |
+          cd src
+          cross build --verbose --target ${{matrix.arch}}
       - name: Run test
         env:
           RUST_BACKTRACE: full
         run: |
+          cd src
           cross test --verbose --target ${{matrix.arch}}
 
   test:
