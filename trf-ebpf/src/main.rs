@@ -23,6 +23,9 @@ use unroll::unroll_for_loops;
 mod bindings;
 use bindings::{ethhdr, iphdr, tcphdr, bpf_attr, bpf_attr__bindgen_ty_13, bpf_cmd};
 
+mod ldap_bindings;
+use ldap_bindings::{LdapBindgs};
+
 /** Logger Offset:
  * Since our Log4j logger example receives input from some
  * HTTP header field (or any other protocol for that matter),
@@ -293,19 +296,20 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
             from testing, it was observable that LDAP searchResEntry packets (with size = 275 bytes)
             had a +1 offset.    (**1)
         */
-        let pool: [u8; 6] = [96, 97, 66, 99, 100, 101];
+        let bindgs: LdapBindgs = LdapBindgs::new();
+        let pool: [u8; 3] = bindgs.get_protocol_op_pool();
         let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
         if fbyte == 48 {
             let mut msgID: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + 4)? };
             let mut protocolOp: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + 5)? };
 
             // test: openldap/*.sh  ;  (**1)
-            if pool.iter().all(|op| op != &protocolOp) {
+            if !bindgs.check_protocol_op_type(protocolOp) {
                 msgID = unsafe { *ptr_at(&ctx, TCP_DATA + 5)? };
                 protocolOp = unsafe { *ptr_at(&ctx, TCP_DATA + 6)? };
             }
             // TODO: create field bindings for protocol operations (like bindings.rs).
-            info!(&ctx, "\tLDAP packet: messageID = {} ; protocolOp = {}", fbyte, msgID, protocolOp);
+            info!(&ctx, "\tLDAP packet: messageID = {} ; protocolOp = {}", msgID, protocolOp);
         }
 
         //info!(&ctx, "\tSent packet from port in LDAP ; fbyte = {}", fbyte);
