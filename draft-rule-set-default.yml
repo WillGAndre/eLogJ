@@ -1,5 +1,6 @@
 log_type: file
 jndi_payload_header: X-Api-Version
+whitelist:
 block:
   - traffic_type: Inbound
     medium: JNDI

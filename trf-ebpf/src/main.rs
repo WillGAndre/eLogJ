@@ -274,8 +274,8 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
                 }
             }
         }
-        elvls[0] = 1  // TCP Data
-    } else if ip_proto == IPPROTO_TCP && LDAP_PORTS.iter().any(|p| p == &saddr_port) { // LDAP Data
+        elvls[0] = 1;  // TCP Data
+    } else if ip_proto == IPPROTO_TCP && LDAP_PORTS.iter().any(|p| p == &saddr_port) {
         /*
             Every LDAP packet data starts with the character '0' (byte - 48, ref: ascii table).
             Assuming that LDAP is running on a native port, using both conditions, shallow/medium
@@ -296,23 +296,25 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
             from testing, it was observable that LDAP searchResEntry packets (with size = 275 bytes)
             had a +1 offset.    (**1)
         */
+        let data_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
         let bindgs: LdapBindgs = LdapBindgs::new();
         let pool: [u8; 3] = bindgs.get_protocol_op_pool();
         let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
-        if fbyte == 48 {
+        if fbyte == 48 { // LDAP Data
             let mut msgID: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + 4)? };
             let mut protocolOp: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + 5)? };
 
             // test: openldap/*.sh  ;  (**1)
-            if !bindgs.check_protocol_op_type(protocolOp) {
+            if data_size >= 100 && !bindgs.check_protocol_op_type(protocolOp) {
                 msgID = unsafe { *ptr_at(&ctx, TCP_DATA + 5)? };
                 protocolOp = unsafe { *ptr_at(&ctx, TCP_DATA + 6)? };
             }
-            // TODO: create field bindings for protocol operations (like bindings.rs).
-            info!(&ctx, "\tLDAP packet: messageID = {} ; protocolOp = {}", msgID, protocolOp);
+            // info!(&ctx, "\tLDAP packet: messageID = {} ; protocolOp = {}", msgID, protocolOp);
+            elvls[1] = data_size as u32; // ldap data packet size
+            elvls[2] = protocolOp as u32; // protocol Operation (ldap)
         }
 
-        //info!(&ctx, "\tSent packet from port in LDAP ; fbyte = {}", fbyte);
+        elvls[0] = 1;  // TCP Data
     }
 
     // RULE SET (idx=1): if 1 --> block LDAP ports

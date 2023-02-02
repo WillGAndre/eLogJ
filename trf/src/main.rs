@@ -1,6 +1,7 @@
 use aya::{include_bytes_aligned, Bpf, Btf};
 use anyhow::Context;
 use aya::util::online_cpus;
+use aya::maps::HashMap;
 use aya::maps::perf::AsyncPerfEventArray;
 use aya::programs::{tc, SchedClassifier, TcAttachType, Xdp, XdpFlags, Lsm};
 use aya_log::BpfLogger;
@@ -22,7 +23,8 @@ struct Opt {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let log_type: String = __config_logger_yml("draft-rule-set-default.yml");
+    let config: (String,Vec<u32>) = __config_logger_yml("draft-rule-set-default.yml");
+    let log_type: String = config.0;
 
     // Create Rsysloggerd
     let rsyslogd = __init_rsysloggerd(log_type.clone());
@@ -63,9 +65,10 @@ async fn main() -> Result<(), anyhow::Error> {
     // ----
 
     // Whitelist ex
-    // let mut whlist: HashMap<_, u32, u32> = HashMap::try_from(bpf.map_mut("WHLIST")?)?;
-    // let temp_addr: u32 = Ipv4Addr::new(1, 1, 1, 1).try_into()?;
-    // whlist.insert(temp_addr, 1, 0)?;
+    let mut whlist: HashMap<_, u32, u32> = HashMap::try_from(bpf.map_mut("WHLIST")?)?;
+    for host in config.1 {
+        whlist.insert(host, 1, 0)?;
+    }
     // ----
 
     // LSM
@@ -122,8 +125,15 @@ async fn main() -> Result<(), anyhow::Error> {
                             } else if levls[1] == 2 { // HTTP: Resp
                                 msg.push_str(&" HTTP Resp;");
                             }
-                            if levls[2] == 1 { // TODO **
-                                msg.push_str(&" LDAP Response;");
+                            if levls[2] != 0 { // LDAP Response
+                                let data_size = levls[1].to_string();
+                                match levls[2] {
+                                    97 => msg.push_str(&" bindResponse"),
+                                    100 => msg.push_str(&" searchResEntry"), 
+                                    101 => msg.push_str(&" searchResDone"),
+                                    _ => {}
+                                }
+                                msg.push_str(&format!(" - size: {} bytes;", data_size));
                             }
                         },
                         1 => { // Inbound (TC)

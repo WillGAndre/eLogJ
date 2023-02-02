@@ -1,5 +1,7 @@
 log_type: file
 jndi_payload_header: X-Api-Version
+whitelist:
+  - 127.0.0.1
 block:
   - traffic_type: Outbound
     medium: TCP

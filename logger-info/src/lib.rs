@@ -2,6 +2,7 @@ use std::{fs::File, io::Write};
 use ascii_converter::string_to_decimals;
 use serde::{Serialize, Deserialize};
 use serde_yaml::{self};
+use std::net::Ipv4Addr;
 
 // --- RuleSet yml ---
 #[derive(Debug, Serialize, Deserialize)]
@@ -15,6 +16,7 @@ struct TrafficType {
 struct RuleSet {
     log_type: String,
     jndi_payload_header: String,
+    whitelist: Vec<String>,
     block: Vec<TrafficType>
 }
 // ---
@@ -43,12 +45,21 @@ impl DefHdrs for http::request::Builder {
 
 // Main configuation file: parses yaml to the necessary config files:
 // rule-set.dat, header-dec-seq.dat and header-offset.dat
-pub fn __config_logger_yml(file: &str) -> String {
+pub fn __config_logger_yml(file: &str) -> (String, Vec<u32>) {
     let mut f = File::open(file).expect("Could not open file.");
     let rules: RuleSet = serde_yaml::from_reader(f).expect("Could not read values.");
     let mut ruleset = [0u8; 4usize];
     let payloadkey = rules.jndi_payload_header;
     f = File::create("trf-common/rule-set.dat").unwrap();
+
+    let mut whitelist: Vec<u32> = Vec::new();
+    for host in &rules.whitelist {
+        let hspit: Vec<u8> = host.split(".").map(|h| h.parse::<u8>().unwrap()).collect();
+        if hspit.len() == 4 {
+            let addr: u32 = Ipv4Addr::new(hspit[0], hspit[1], hspit[2], hspit[3]).try_into().unwrap();
+            whitelist.push(addr);
+        }
+    }
 
     for action in &rules.block {
         if action.traffic_type == "Inbound" {
@@ -79,7 +90,7 @@ pub fn __config_logger_yml(file: &str) -> String {
     write!(f, "{:?}", ruleset).expect("write header offset to file");
     __config_logger_payload(Some(&payloadkey));
 
-    return rules.log_type
+    return (rules.log_type, whitelist)
 }
 
 /** Logger config files:
