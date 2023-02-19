@@ -6,6 +6,7 @@ use cmd_lib::run_cmd;
 // Add auto config to rsyslog file: https://wazuh.com/blog/how-to-configure-rsyslog-client-to-send-events-to-wazuh/
 
 // TODO: check if rsyslog installed; install & set config (remote/local)
+// (remote) res: https://serverfault.com/a/181440
 
 pub struct Rsysloggerd {
     log_type: String

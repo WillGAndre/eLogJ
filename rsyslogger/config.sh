@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # TODO: add opt
-#  - purge
 #  - remote log config
+#    1) setup rsyslog remote config
+#    2) check docker container master / set config --fail--> dump sample ossec.conf
 
 if [ ! -f /etc/rsyslog.d/0-filefwd.conf ]; then
     printf "\t[!] attempting to set default rsyslog local log file config \n"
@@ -16,7 +17,7 @@ if [ ! -f /etc/rsyslog.d/0-filefwd.conf ]; then
     sudo systemctl restart rsyslog
 
     # log id and priority
-    logger -i -p local6.info info-sample-test
+    logger -i -t elogj.info -p local6.info info-sample-test
     tail /tmp/elogj-info.log | grep info-sample-test
     if [ $? -eq 0 ]; then
         printf "\t[+] info sample test log verified \n"
