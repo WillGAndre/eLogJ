@@ -15,6 +15,7 @@ extended Log4j observability tool used to detect and prevent malicious JNDI (/LD
 0.1.5: Rulesets configured using yaml file.
 0.1.6: "file"/"local" log_type (yaml)
 0.1.7: Added whitelist to yaml & LDAP Response tracing
+0.1.8: Remote Agent-less logging (Wazuh Manager)
 </pre>
 
 ### Dependencies

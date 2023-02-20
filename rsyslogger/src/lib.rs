@@ -20,7 +20,7 @@ pub fn __init_rsysloggerd(log_type: String) -> Rsysloggerd {
 
 impl Rsysloggerd {
     fn __config_base(self) -> Self {
-        let boot = "rsyslogger/config.sh";
+        let boot = format!("rsyslogger/config.sh {}", self.log_type);
         if run_cmd! {
             sh ${boot}
         }.is_err() {
@@ -46,7 +46,7 @@ pub fn remote_log() {
         .expect("sh command failed to start");
 }
 
-pub fn local_info_log(log: String) {
+pub fn info_log(log: String) {
     if run_cmd! {
         logger -i -t elogj.info -p local6.info ${log}
     }.is_err() {

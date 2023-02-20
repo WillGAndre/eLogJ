@@ -1,4 +1,4 @@
-log_type: file
+log_type: file | local | manager
 jndi_payload_header: X-Api-Version
 whitelist:
   - 127.0.0.1

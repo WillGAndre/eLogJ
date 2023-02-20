@@ -12,7 +12,7 @@ use trf_common::EventLog;
 use logger_info::{__config_logger_yml};
 use std::net::Ipv4Addr;
 use bytes::BytesMut;
-use rsyslogger::{remote_log, local_info_log, __init_rsysloggerd};
+use rsyslogger::{info_log, __init_rsysloggerd};
 
 // Interface where services are exposed (docker {springboot} {LDAP} - docker0)
 #[derive(Debug, Parser)]
@@ -29,10 +29,6 @@ async fn main() -> Result<(), anyhow::Error> {
     // Create Rsysloggerd
     let rsyslogd = __init_rsysloggerd(log_type.clone());
     let opt = Opt::parse();
-
-    // debug
-    //remote_log();
-    //local_info_log("elogj-sample-info-test");
 
     env_logger::init();
     
@@ -146,20 +142,12 @@ async fn main() -> Result<(), anyhow::Error> {
                             }
                         },
                         _ => {}
-                    }
-
-                    if log_type == String::from("file") {
-                        local_info_log(msg);
-                    } else if log_type == String::from("local") {
+                    } 
+                    
+                    info_log(msg);
+                    if log_type == String::from("local") {
                         info!("{}", msg);
                     }
-                    // match data.etype {
-                    //     0 => local_info_log(format!("ig: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction)),
-                    //     1 => local_info_log(format!("eg: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction)),
-                    //     //0 => info!("ig: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction),
-                    //     //1 => info!("eg: {} --> {} elvls: {:?} action: {:?}", saddr, daddr, data.elvls, data.eaction),
-                    //     _ => {},
-                    // }
                 }
             }
         });
