@@ -5,8 +5,8 @@ readonly WM_ADDR="192.168.1.54"
 if [ "$log_type" == "file" ] || [ "$log_type" == "local" ]; then
     if [ ! -f /etc/rsyslog.d/0-filefwd.conf ]; then
         printf "\t[!] attempting to set rsyslog local log file config \n"
-        sudo touch /etc/rsyslog.d/0-filefwd.conf
-        sudo touch /tmp/elogj-info.log
+        touch /etc/rsyslog.d/0-filefwd.conf
+        touch /tmp/elogj-info.log
         sudo chmod 766 /tmp/elogj-info.log
         sudo echo 'if ($syslogseverity == 6) then
         {
@@ -27,8 +27,8 @@ if [ "$log_type" == "file" ] || [ "$log_type" == "local" ]; then
 elif [ "$log_type" == "manager" ]; then
     if [ ! -f /etc/rsyslog.d/0-filefwd.conf ]; then
         printf "\t[!] attempting to set rsyslog Wazuh Manager forward logger config \n"
-        sudo touch /etc/rsyslog.d/0-filefwd.conf
-        sudo touch /tmp/elogj-info.log
+        touch /etc/rsyslog.d/0-filefwd.conf
+        touch /tmp/elogj-info.log
         sudo chmod 766 /tmp/elogj-info.log
         sudo echo "if (\$syslogseverity == 6) then
         {
