@@ -144,9 +144,10 @@ async fn main() -> Result<(), anyhow::Error> {
                         _ => {}
                     } 
                     
-                    info_log(msg);
                     if log_type == String::from("local") {
                         info!("{}", msg);
+                    } else {
+                        info_log(msg);
                     }
                 }
             }
