@@ -34,3 +34,4 @@ jobs:
 
       - name: Build
         run: ./build.sh
+
