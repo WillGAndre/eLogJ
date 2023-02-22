@@ -31,13 +31,13 @@ elif [ $log_type = "manager" ]; then
         sudo touch /tmp/elogj-info.log
         sudo chmod 766 /tmp/elogj-info.log
         echo "if (\$syslogseverity == 6) then
-    {
-        *.* action(type="omfwd"
-                queue.type="linkedlist"
-                action.resumeRetryCount="-1"
-                target=\"$WM_ADDR\" port="514" protocol="udp"
-            )
-    }" | sudo tee -a /etc/rsyslog.d/0-filefwd.conf
+{
+    *.* action(type=\"omfwd\"
+        queue.type=\"linkedlist\"
+        action.resumeRetryCount=\"-1\"
+        target=\"$WM_ADDR\" port=\"514\" protocol=\"udp\"
+    )
+}" | sudo tee -a /etc/rsyslog.d/0-filefwd.conf
         sudo systemctl restart rsyslog
         logger -i -t elogj.info -p local6.info {"app":"core","message":"Login failed: 'admin' (Remote IP: '127.0.0.1', X-Forwarded-For: '')","level":2,"time":"2015-06-09T08:16:29+00:00","@source":"ownCloud"}
     fi
