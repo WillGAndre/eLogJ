@@ -52,7 +52,7 @@ const HEADER_SEQ: [u8; LOGGER_INFO[0]] = core::include!("../../trf-common/header
 const RULE_SET: [u32; 4usize] = core::include!("../../trf-common/rule-set.dat");
 /*
     0: Block TCP (1) / Block HTTP (2)                           ----> NOTE: OUTBOUND TRAFFIC ONLY
-    1: Block LDAP ports                                        --/   (Future work: custom ports / differentiate outbound/inbound traffic)
+    1: Block LDAP ports                                        --/   (Future work: custom ports)
     2: Block JNDI lookup (1) / Block JNDI request (2)
     3: Block JNDI:LDAP lookup (1) / Block JNDI:LDAP request (2)
 
@@ -212,7 +212,7 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
     if h_proto != ETH_P_IP {
         return Ok(xdp_action::XDP_PASS)
     }
-    let mut srcldap: u8 = 0;
+
     let mut eroute = [0u32 ; 2usize];
     let mut eaction = [0u32 ; 2usize];
     let mut elvls = [0u32 ; 3usize];
@@ -298,7 +298,7 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
         */
         let data_size = ((ctx.data_end() - ctx.data()) - (TCP_DATA)) as usize;
         let bindgs: LdapBindgs = LdapBindgs::new();
-        let _pool: [u8; 3] = bindgs.get_protocol_op_pool();
+        let pool: [u8; 3] = bindgs.get_protocol_op_pool();
         let fbyte: u8 = unsafe { *ptr_at(&ctx, TCP_DATA)? };
         if fbyte == 48 { // LDAP Data
             let mut msgID: u8 = unsafe { *ptr_at(&ctx, TCP_DATA + 4)? };
@@ -315,11 +315,10 @@ fn try_intrf(ctx: XdpContext) -> Result<u32, ()> {
         }
 
         elvls[0] = 1;  // TCP Data
-        srcldap = 1;   // Src LDAP
     }
 
     // RULE SET (idx=1): if 1 --> block LDAP ports
-    if RULE_SET[1] == 1 && ( LDAP_PORTS.map(|p| p == daddr_port).len() > 0 || srcldap == 1 ) {
+    if RULE_SET[1] == 1 && LDAP_PORTS.map(|p| p == daddr_port).len() > 0 {
         ctxdrop = 1;
     }
 
