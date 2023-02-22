@@ -31,9 +31,6 @@ jobs:
 
       - name: Install bpf-linker
         run: cargo install bpf-linker
-        
-      - name: Install xtask
-        run: cargo xtask install
 
       - name: Build
         run: ./build.sh
