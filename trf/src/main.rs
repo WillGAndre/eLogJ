@@ -144,7 +144,7 @@ async fn main() -> Result<(), anyhow::Error> {
                         _ => {}
                     } 
                     
-                    if log_type == String::from("local") {
+                    if log_type == String::from("local") || log_type == String::from("manager") {
                         info!("{}", msg);
                     } else {
                         info_log(msg);
