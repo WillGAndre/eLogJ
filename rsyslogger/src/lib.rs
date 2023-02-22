@@ -20,9 +20,10 @@ pub fn __init_rsysloggerd(log_type: String) -> Rsysloggerd {
 
 impl Rsysloggerd {
     fn __config_base(self) -> Self {
-        let boot = format!("rsyslogger/config.sh {}", self.log_type);
+        // let boot = format!("rsyslogger/config.sh {}", self.log_type);
+        let log_type = format!("{}", log_type)
         if run_cmd! {
-            sh ${boot}
+            sh rsyslogger/config.sh ${log_type}
         }.is_err() {
             println!("error running rsyslog config");
         }
